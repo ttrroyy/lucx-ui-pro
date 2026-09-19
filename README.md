@@ -77,28 +77,28 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-
 **Установить скрипт бэкапа**
 
 ```bash
-wget -qO /usr/local/bin/x-ui-backup https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/assets/backup/x-ui-backup.sh
-chmod +x /usr/local/bin/x-ui-backup
+wget -qO /usr/local/bin/lucx-ui-backup https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh
+chmod +x /usr/local/bin/lucx-ui-backup
 ```
 
 **Создать бэкап**
 
 ```bash
-x-ui-backup backup
+lucx-ui-backup backup
 ```
 
 **Список бэкапов**
 
 ```bash
-x-ui-backup list
+lucx-ui-backup list
 ```
 
 **Восстановить из бэкапа** (на чистом сервере, пакеты ставятся автоматически)
 
 ```bash
-x-ui-backup restore /var/backups/x-ui/x-ui-backup-20260101-120000.tar.gz
+lucx-ui-backup restore /var/backups/lucx-ui/lucx-ui-backup-20260101-120000.tar.gz
 ```
 
-Бэкап включает: конфиги nginx, БД панели, бинарник 3x-ui, SSL-сертификаты, веб-контент, systemd-юниты, cron, правила UFW.
+Бэкап включает: конфиги nginx, БД LucX, бинарник панели, SSL, сайт-заглушка, AdGuard Home, systemd, cron, UFW. На время backup панель коротко останавливается.
 
 ---
