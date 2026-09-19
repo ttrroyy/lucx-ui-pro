@@ -475,7 +475,10 @@ choose_hysteria2() {
 insert_hy2_inbound() {
     [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
-    local salamander_pass gid_col gid_hy2
+    local hy2_auth salamander_pass gid_col gid_hy2
+    # LucX-UI stores Hysteria2 as the Xray "hysteria" protocol (version 2).
+    # Keep auth and Salamander obfuscation passwords separate, like the panel UI.
+    hy2_auth=$(gen_random_string 10)
     salamander_pass=$(gen_random_string 16)
     gid_col=""
     gid_hy2=""
@@ -483,25 +486,38 @@ insert_hy2_inbound() {
         gid_col='"group_id",'
         gid_hy2="'$(gen_group_id)',"
     fi
-    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
+    python3 - "$XUIDB" "$hy2_port" "$hy2_auth" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
 import json, sqlite3, sys
-db, port, salamander, domain, gid_col, gid_hy2 = sys.argv[1:7]
+
+db, port, auth, salamander, domain, gid_col, gid_hy2 = sys.argv[1:8]
 port = int(port)
+
+# This is the DB representation used by current 3x-ui/LucX-UI:
+# protocol=hysteria, settings.version=2, streamSettings.network=hysteria.
 settings = json.dumps({
-    "clients": [{"id": salamander, "flow": ""}],
-    "auth": True,
-    "auth_str": salamander,
-    "up_mbps": 1000,
-    "down_mbps": 1000,
-    "ignore_client_bandwidth": True,
-    "obfs": "salamander",
-    "obfs_password": salamander,
-    "masquerade": "",
-    "brutal_debug": False
+    "version": 2,
+    "clients": [{
+        "auth": auth,
+        "email": "hy2",
+        "enable": True,
+        "limitIp": 0,
+        "totalGB": 0,
+        "expiryTime": 0,
+        "tgId": 0,
+        "subId": "",
+        "comment": "",
+        "reset": 0
+    }]
 }, ensure_ascii=False)
+
 stream = json.dumps({
-    "network": "udp",
+    "network": "hysteria",
     "security": "tls",
+    "hysteriaSettings": {
+        "version": 2,
+        "auth": "",
+        "udpIdleTimeout": 60
+    },
     "tlsSettings": {
         "serverName": domain,
         "certificates": [{
@@ -510,20 +526,43 @@ stream = json.dumps({
         }],
         "alpn": ["h3"]
     },
-    "sockopt": {"acceptProxyProtocol": False, "tcpFastOpen": False, "tcpMptcp": False, "tcpNoDelay": False, "domainStrategy": "UseIP"}
+    "finalmask": {
+        "tcp": [],
+        "udp": [{
+            "type": "salamander",
+            "settings": {"password": salamander}
+        }]
+    }
 }, ensure_ascii=False)
-sniffing = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}, ensure_ascii=False)
+
+sniffing = json.dumps({
+    "enabled": True,
+    "destOverride": ["http", "tls", "quic", "fakedns"],
+    "metadataOnly": False,
+    "routeOnly": False
+}, ensure_ascii=False)
+
 tag = "inbound-%s" % port
+
 con = sqlite3.connect(db, timeout=30)
 cur = con.cursor()
-row = cur.execute("SELECT id FROM inbounds WHERE protocol='hysteria2' OR tag=? LIMIT 1", (tag,)).fetchone()
+row = cur.execute(
+    "SELECT id FROM inbounds WHERE protocol IN ('hysteria','hysteria2') OR tag=? LIMIT 1",
+    (tag,)
+).fetchone()
 if row:
     con.close()
     print("exists")
     raise SystemExit(0)
-cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria2", settings, stream, tag, sniffing))
+
+cur.execute(
+    "INSERT INTO inbounds "
+    "(user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) "
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria", settings, stream, tag, sniffing)
+)
 inbound_id = cur.lastrowid
+
 cols = '"inbound_id",%s"sort_order","remark","address","port","security","fingerprint","alpn"' % gid_col
 vals = [inbound_id]
 if gid_col:
@@ -531,12 +570,13 @@ if gid_col:
 vals.extend([0, "hy2", domain, port, "tls", "firefox", '["h3"]'])
 placeholders = ",".join(["?"] * len(vals))
 cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
+
 con.commit()
 con.close()
 print("ok", port)
 PY
     [[ $? -eq 0 ]] || { msg_err "Failed to insert Hysteria2 inbound."; return 1; }
-    msg_ok "Inbound Hysteria2 created (UDP ${hy2_port})."
+    msg_ok "Inbound Hysteria2 created (Xray protocol hysteria / QUIC over UDP ${hy2_port})."
 }
 
 choose_extra_inbound() {
