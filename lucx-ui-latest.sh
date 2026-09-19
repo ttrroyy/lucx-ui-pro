@@ -476,8 +476,8 @@ insert_hy2_inbound() {
     [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
     local hy2_auth salamander_pass gid_col gid_hy2
-    # LucX-UI stores Hysteria2 as the Xray "hysteria" protocol (version 2).
-    # Keep auth and Salamander obfuscation passwords separate, like the panel UI.
+    # LucX-UI stores Hysteria2 as Xray protocol "hysteria" with Hysteria v2 transport.
+    # Do not create an X-UI client row: use the transport-level Hysteria auth instead.
     hy2_auth=$(gen_random_string 10)
     salamander_pass=$(gen_random_string 16)
     gid_col=""
@@ -494,32 +494,27 @@ port = int(port)
 
 # This is the DB representation used by current 3x-ui/LucX-UI:
 # protocol=hysteria, settings.version=2, streamSettings.network=hysteria.
-settings = json.dumps({
-    "version": 2,
-    "clients": [{
-        "auth": auth,
-        "email": "hy2",
-        "enable": True,
-        "limitIp": 0,
-        "totalGB": 0,
-        "expiryTime": 0,
-        "tgId": 0,
-        "subId": "",
-        "comment": "",
-        "reset": 0
-    }]
-}, ensure_ascii=False)
+settings = json.dumps({"version": 2}, ensure_ascii=False)
 
 stream = json.dumps({
     "network": "hysteria",
     "security": "tls",
     "hysteriaSettings": {
         "version": 2,
-        "auth": "",
+        "auth": auth,
         "udpIdleTimeout": 60
     },
     "tlsSettings": {
         "serverName": domain,
+        "minVersion": "1.2",
+        "maxVersion": "1.3",
+        "cipherSuites": "",
+        "settings": {
+            "fingerprint": "firefox",
+            "echConfigList": "",
+            "pinnedPeerCertSha256": [],
+            "verifyPeerCertByName": ""
+        },
         "certificates": [{
             "certificateFile": "/root/cert/%s/fullchain.pem" % domain,
             "keyFile": "/root/cert/%s/privkey.pem" % domain
@@ -567,7 +562,7 @@ cols = '"inbound_id",%s"sort_order","remark","address","port","security","finger
 vals = [inbound_id]
 if gid_col:
     vals.append(gid_hy2.strip("',"))
-vals.extend([0, "hy2", domain, port, "tls", "firefox", '["h3"]'])
+vals.extend([0, "hy2", domain, port, "", "", '["h3"]'])
 placeholders = ",".join(["?"] * len(vals))
 cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
 
