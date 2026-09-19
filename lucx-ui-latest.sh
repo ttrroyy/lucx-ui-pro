@@ -475,103 +475,103 @@ choose_hysteria2() {
 insert_hy2_inbound() {
     [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
-    local hy2_auth salamander_pass gid_col gid_hy2
-    # LucX-UI stores Hysteria2 as Xray protocol "hysteria" with Hysteria v2 transport.
-    # Do not create an X-UI client row: use the transport-level Hysteria auth instead.
-    hy2_auth=$(gen_random_string 10)
-    salamander_pass=$(gen_random_string 16)
+    local salamander_pass client_auth client_email client_sub client_uuid gid_col gid_hy2
+    salamander_pass=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
+    client_auth=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
+    client_email=$(gen_random_string 10 | tr '[:upper:]' '[:lower:]')
+    client_sub=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
+    client_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')
     gid_col=""
     gid_hy2=""
     if sqlite3 "$XUIDB" "PRAGMA table_info(hosts);" | grep -qw "group_id"; then
         gid_col='"group_id",'
         gid_hy2="'$(gen_group_id)',"
     fi
-    python3 - "$XUIDB" "$hy2_port" "$hy2_auth" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
+    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" \
+        "$client_auth" "$client_email" "$client_sub" "$client_uuid" <<'PY'
 import json, sqlite3, sys
-
-db, port, auth, salamander, domain, gid_col, gid_hy2 = sys.argv[1:8]
+(db, port, salamander, domain, gid_col, gid_hy2,
+ client_auth, client_email, client_sub, client_uuid) = sys.argv[1:11]
 port = int(port)
-
-# This is the DB representation used by current 3x-ui/LucX-UI:
-# protocol=hysteria, settings.version=2, streamSettings.network=hysteria.
-settings = json.dumps({"version": 2}, ensure_ascii=False)
-
-stream = json.dumps({
+cert = "/root/cert/%s/fullchain.pem" % domain
+key = "/root/cert/%s/privkey.pem" % domain
+settings = {
+    "version": 2,
+    "clients": [{
+        "id": client_uuid,
+        "email": client_email,
+        "auth": client_auth,
+        "subId": client_sub,
+        "enable": True,
+        "flow": "",
+        "limitIp": 0,
+        "totalGB": 0,
+        "expiryTime": 0,
+        "tgId": "",
+        "comment": "",
+        "reset": 0
+    }]
+}
+stream = {
     "network": "hysteria",
     "security": "tls",
     "hysteriaSettings": {
         "version": 2,
-        "auth": auth,
         "udpIdleTimeout": 60
     },
     "tlsSettings": {
         "serverName": domain,
-        "minVersion": "1.2",
-        "maxVersion": "1.3",
-        "cipherSuites": "",
-        "settings": {
-            "fingerprint": "firefox",
-            "echConfigList": "",
-            "pinnedPeerCertSha256": [],
-            "verifyPeerCertByName": ""
-        },
+        "alpn": ["h3"],
         "certificates": [{
-            "certificateFile": "/root/cert/%s/fullchain.pem" % domain,
-            "keyFile": "/root/cert/%s/privkey.pem" % domain
+            "useFile": True,
+            "certificateFile": cert,
+            "keyFile": key,
+            "certificate": [],
+            "key": [],
+            "ocspStapling": 0,
+            "oneTimeLoading": False,
+            "usage": "encipherment",
+            "buildChain": False
         }],
-        "alpn": ["h3"]
+        "settings": {
+            "fingerprint": ""
+        }
     },
     "finalmask": {
         "tcp": [],
-        "udp": [{
-            "type": "salamander",
-            "settings": {"password": salamander}
-        }]
+        "udp": [{"type": "salamander", "settings": {"password": salamander}}]
     }
-}, ensure_ascii=False)
-
-sniffing = json.dumps({
-    "enabled": True,
-    "destOverride": ["http", "tls", "quic", "fakedns"],
-    "metadataOnly": False,
-    "routeOnly": False
-}, ensure_ascii=False)
-
+}
+sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
 tag = "inbound-%s" % port
-
 con = sqlite3.connect(db, timeout=30)
 cur = con.cursor()
-row = cur.execute(
-    "SELECT id FROM inbounds WHERE protocol IN ('hysteria','hysteria2') OR tag=? LIMIT 1",
-    (tag,)
-).fetchone()
+row = cur.execute("SELECT id FROM inbounds WHERE protocol='hysteria' OR tag=? LIMIT 1", (tag,)).fetchone()
 if row:
     con.close()
     print("exists")
     raise SystemExit(0)
-
 cur.execute(
-    "INSERT INTO inbounds "
-    "(user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria", settings, stream, tag, sniffing)
+    "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria",
+     json.dumps(settings, ensure_ascii=False),
+     json.dumps(stream, ensure_ascii=False),
+     tag, json.dumps(sniffing, ensure_ascii=False)),
 )
 inbound_id = cur.lastrowid
-
 cols = '"inbound_id",%s"sort_order","remark","address","port","security","fingerprint","alpn"' % gid_col
 vals = [inbound_id]
 if gid_col:
     vals.append(gid_hy2.strip("',"))
-vals.extend([0, "hy2", domain, port, "same", "", '["h3"]'])
+vals.extend([0, "hy2", domain, port, "tls", "firefox", '["h3"]'])
 placeholders = ",".join(["?"] * len(vals))
 cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
-
 con.commit()
 con.close()
 print("ok", port)
 PY
     [[ $? -eq 0 ]] || { msg_err "Failed to insert Hysteria2 inbound."; return 1; }
-    msg_ok "Inbound Hysteria2 created (Xray protocol hysteria / QUIC over UDP ${hy2_port})."
+    msg_ok "Inbound Hysteria2 created (UDP ${hy2_port})."
 }
 
 choose_extra_inbound() {
