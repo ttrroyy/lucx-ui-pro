@@ -71,6 +71,7 @@ PANEL_VERSION=""
 DNS_CHOICE=""
 EXTRA_INBOUND="1"
 DEPLOY_AGH=""
+DEPLOY_HY2=""
 ADGUARD_ONLY=""
 ADGUARD_UNINSTALL=""
 CUSTOM_DOH_URL=""
@@ -125,7 +126,7 @@ make_port() {
 # ─── Generate ports & paths (done once at startup) ───────────────────────────
 sub_port=$(make_port)
 panel_port=$(make_port)
-hy2_port=44333
+hy2_port=""
 
 sub_path=$(gen_random_string 10)
 json_path=$(gen_random_string 10)
@@ -410,6 +411,134 @@ PY
 }
 apply_xray_dns() { apply_xray_template; }
 
+choose_hysteria2() {
+    local ans mapped tty p
+    DEPLOY_HY2=""
+    hy2_port=""
+    tty="/dev/tty"
+    [[ -r /dev/tty ]] || tty=""
+    while true; do
+        echo
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        msg_inf 'Ставить Hysteria2?'
+        echo '  1) Да'
+        echo '  2) Нет'
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        echo -en 'Выбор [1-2]: '
+        if [[ -n "$tty" ]]; then
+            read -r ans <"$tty" || ans=""
+        else
+            read -r ans || ans=""
+        fi
+        mapped=$(echo "$ans" | tr -d '[:space:]')
+        case "$mapped" in
+            1) DEPLOY_HY2="1"; break ;;
+            2) DEPLOY_HY2="2"; break ;;
+        esac
+    done
+    if [[ "$DEPLOY_HY2" != "1" ]]; then
+        echo
+        return 0
+    fi
+    while true; do
+        echo
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        msg_inf 'Выберите порт для Hysteria2:'
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        echo -en 'Порт: '
+        if [[ -n "$tty" ]]; then
+            read -r p <"$tty" || p=""
+        else
+            read -r p || p=""
+        fi
+        p=$(echo "$p" | tr -d '[:space:]')
+        if [[ ! "$p" =~ ^[0-9]+$ ]] || (( p < 1 || p > 65535 )); then
+            msg_err "Некорректный порт."
+            continue
+        fi
+        case "$p" in
+            80|46000|56000|56001|56003)
+                msg_err "Порт ${p} занят."
+                continue
+                ;;
+        esac
+        if ss -Hlnu "sport = :$p" 2>/dev/null | grep -q .; then
+            msg_err "Порт ${p} занят."
+            continue
+        fi
+        hy2_port="$p"
+        break
+    done
+    echo
+}
+
+insert_hy2_inbound() {
+    [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
+    [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
+    local salamander_pass gid_col gid_hy2
+    salamander_pass=$(gen_random_string 16)
+    gid_col=""
+    gid_hy2=""
+    if sqlite3 "$XUIDB" "PRAGMA table_info(hosts);" | grep -qw "group_id"; then
+        gid_col='"group_id",'
+        gid_hy2="'$(gen_group_id)',"
+    fi
+    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
+import json, sqlite3, sys
+db, port, salamander, domain, gid_col, gid_hy2 = sys.argv[1:7]
+port = int(port)
+settings = json.dumps({
+    "clients": [{"id": salamander, "flow": ""}],
+    "auth": True,
+    "auth_str": salamander,
+    "up_mbps": 1000,
+    "down_mbps": 1000,
+    "ignore_client_bandwidth": True,
+    "obfs": "salamander",
+    "obfs_password": salamander,
+    "masquerade": "",
+    "brutal_debug": False
+}, ensure_ascii=False)
+stream = json.dumps({
+    "network": "udp",
+    "security": "tls",
+    "tlsSettings": {
+        "serverName": domain,
+        "certificates": [{
+            "certificateFile": "/root/cert/%s/fullchain.pem" % domain,
+            "keyFile": "/root/cert/%s/privkey.pem" % domain
+        }],
+        "alpn": ["h3"]
+    },
+    "sockopt": {"acceptProxyProtocol": False, "tcpFastOpen": False, "tcpMptcp": False, "tcpNoDelay": False, "domainStrategy": "UseIP"}
+}, ensure_ascii=False)
+sniffing = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}, ensure_ascii=False)
+tag = "inbound-%s" % port
+con = sqlite3.connect(db, timeout=30)
+cur = con.cursor()
+row = cur.execute("SELECT id FROM inbounds WHERE protocol='hysteria2' OR tag=? LIMIT 1", (tag,)).fetchone()
+if row:
+    con.close()
+    print("exists")
+    raise SystemExit(0)
+cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria2", settings, stream, tag, sniffing))
+inbound_id = cur.lastrowid
+cols = '"inbound_id",%s"sort_order","remark","address","port","security","fingerprint","alpn"' % gid_col
+vals = [inbound_id]
+if gid_col:
+    vals.append(gid_hy2.strip("',"))
+vals.extend([0, "hy2", domain, port, "tls", "firefox", '["h3"]'])
+placeholders = ",".join(["?"] * len(vals))
+cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
+con.commit()
+con.close()
+print("ok", port)
+PY
+    [[ $? -eq 0 ]] || { msg_err "Failed to insert Hysteria2 inbound."; return 1; }
+    msg_ok "Inbound Hysteria2 created (UDP ${hy2_port})."
+}
+
 choose_extra_inbound() {
     local ans mapped tty
     EXTRA_INBOUND=""
@@ -491,11 +620,7 @@ choose_adguard() {
         echo '  2) Нет'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-2]: '
-        if [[ -n "$tty" ]]; then
-            read -r ans <"$tty" || ans=""
-        else
-            read -r ans || ans=""
-        fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         case "$mapped" in
             1|2) DEPLOY_AGH="$mapped"; break ;;
@@ -503,7 +628,6 @@ choose_adguard() {
     done
     echo
 }
-
 uninstall_adguard() {
     systemctl stop AdGuardHome 2>/dev/null || true
     [[ -x /opt/AdGuardHome/AdGuardHome ]] && /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
@@ -512,33 +636,27 @@ uninstall_adguard() {
         [[ -f "$f" ]] || continue
         sed -i '\|snippets/adguard.conf|d' "$f"
     done
-    if nginx -t &>/dev/null; then systemctl reload nginx; fi
+    nginx -t &>/dev/null && systemctl reload nginx
     msg_ok "AdGuard Home removed."
 }
-
 install_adguard() {
     local AGH_DIR=/opt/AdGuardHome AGH_YAML=/opt/AdGuardHome/AdGuardHome.yaml
     local AGH_SNIPPET=/etc/nginx/snippets/adguard.conf AGH_SERVICE=AdGuardHome
     local vhost agh_path agh_web_port agh_dns_port agh_arch agh_user agh_pass agh_hash
-    local new_credentials=0 agh_up=0 GH doh_status p
+    local new_credentials=0 agh_up=0 GH p
     GH='https://github.com'
     [[ -f $XUIDB ]] || { msg_err "x-ui.db not found — install the panel first."; return 1; }
     command -v sqlite3 >/dev/null || apt-get install -y -q sqlite3
     if [[ -z "${domain:-}" ]]; then
         local web_cert
         web_cert=$(sqlite3 "$XUIDB" "SELECT value FROM settings WHERE key='webCertFile';" 2>/dev/null || true)
-        if [[ "$web_cert" =~ /root/cert/([^/]+)/ || "$web_cert" =~ /etc/letsencrypt/live/([^/]+)/ ]]; then
-            domain="${BASH_REMATCH[1]}"
-        fi
+        if [[ "$web_cert" =~ /root/cert/([^/]+)/ || "$web_cert" =~ /etc/letsencrypt/live/([^/]+)/ ]]; then domain="${BASH_REMATCH[1]}"; fi
     fi
     if [[ -z "${domain:-}" ]]; then
         for f in /etc/nginx/sites-available/*; do
             [[ -f "$f" ]] || continue
             case "$(basename "$f")" in 80.conf|00-maps.conf) continue;; esac
-            if grep -q 'listen 7443' "$f" 2>/dev/null; then
-                domain=$(awk '/server_name/{print $2; exit}' "$f" | tr -d ';')
-                break
-            fi
+            if grep -q 'listen 7443' "$f" 2>/dev/null; then domain=$(awk '/server_name/{print $2; exit}' "$f" | tr -d ';'); break; fi
         done
     fi
     [[ -n "${domain:-}" ]] || { msg_err "Could not determine panel domain."; return 1; }
@@ -553,41 +671,24 @@ install_adguard() {
     fi
     [[ -n "$vhost" ]] || { msg_err "Panel vhost (listen 7443) not found."; return 1; }
     agh_path=""
-    if [[ -f "$AGH_SNIPPET" ]]; then
-        agh_path=$(grep -oP 'location /\Kadg-[a-zA-Z0-9]+' "$AGH_SNIPPET" | head -1 || true)
-    fi
+    [[ -f "$AGH_SNIPPET" ]] && agh_path=$(grep -oP 'location /\Kadg-[a-zA-Z0-9]+' "$AGH_SNIPPET" | head -1 || true)
     [[ -n "$agh_path" ]] || agh_path="adg-$(gen_random_string 12)"
     agh_web_port=""
-    if [[ -f "$AGH_YAML" ]]; then
-        agh_web_port=$(grep -oP '^\s*address:\s*127\.0\.0\.1:\K\d+' "$AGH_YAML" | head -1 || true)
-    fi
+    [[ -f "$AGH_YAML" ]] && agh_web_port=$(grep -oP '^\s*address:\s*127\.0\.0\.1:\K\d+' "$AGH_YAML" | head -1 || true)
     if [[ -z "$agh_web_port" ]]; then
-        while true; do
-            p=$(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 ))
-            ss -Hln "sport = :$p" 2>/dev/null | grep -q . || { agh_web_port="$p"; break; }
-        done
+        while true; do p=$(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 )); ss -Hln "sport = :$p" 2>/dev/null | grep -q . || { agh_web_port="$p"; break; }; done
     fi
-    while true; do
-        p=$(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 ))
-        ss -Hln "sport = :$p" 2>/dev/null | grep -q . || { agh_dns_port="$p"; break; }
-    done
+    while true; do p=$(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 )); ss -Hln "sport = :$p" 2>/dev/null | grep -q . || { agh_dns_port="$p"; break; }; done
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl tar ca-certificates apache2-utils
-    case "$(uname -m)" in
-        x86_64)  agh_arch="amd64";;
-        aarch64) agh_arch="arm64";;
-        armv7l)  agh_arch="armv7";;
-        *) msg_err "Unsupported architecture: $(uname -m)"; return 1;;
-    esac
+    case "$(uname -m)" in x86_64) agh_arch="amd64";; aarch64) agh_arch="arm64";; armv7l) agh_arch="armv7";; *) msg_err "Unsupported architecture"; return 1;; esac
     if [[ ! -x "${AGH_DIR}/AdGuardHome" ]]; then
         mkdir -p /opt
         curl -fsSL "${GH}/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz" | tar -xz -C /opt
         [[ -x "${AGH_DIR}/AdGuardHome" ]] || { msg_err "AdGuard Home download failed."; return 1; }
     fi
-    agh_user="admin"
-    agh_pass=""
-    if [[ -f "$AGH_YAML" ]]; then
-        new_credentials=0
+    agh_user="admin"; agh_pass=""
+    if [[ -f "$AGH_YAML" ]]; then new_credentials=0
     else
         new_credentials=1
         agh_pass=$(gen_random_string 20)
@@ -643,27 +744,11 @@ INFO
         grep -q '^AGH_PATH=' /root/.lucx-adguard-info 2>/dev/null || echo "AGH_PATH=${agh_path}" >> /root/.lucx-adguard-info
         grep -q '^AGH_DOMAIN=' /root/.lucx-adguard-info 2>/dev/null || echo "AGH_DOMAIN=${domain}" >> /root/.lucx-adguard-info
         grep -q '^AGH_IP=' /root/.lucx-adguard-info 2>/dev/null || echo "AGH_IP=${IP4}" >> /root/.lucx-adguard-info
-    else
-        umask 077
-        cat > /root/.lucx-adguard-info <<INFO
-AGH_USER=${agh_user}
-AGH_PASS=
-AGH_PATH=${agh_path}
-AGH_DOMAIN=${domain}
-AGH_IP=${IP4}
-INFO
-        chmod 600 /root/.lucx-adguard-info
     fi
-    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${AGH_SERVICE}\.service"; then
-        systemctl restart "$AGH_SERVICE"
-    else
-        "${AGH_DIR}/AdGuardHome" -s install
-    fi
-    for _ in $(seq 1 20); do
-        if curl -fso /dev/null "http://127.0.0.1:${agh_web_port}/"; then agh_up=1; break; fi
-        sleep 0.5
-    done
-    [[ $agh_up -eq 1 ]] || { msg_err "AdGuard Home did not start on 127.0.0.1:${agh_web_port}"; return 1; }
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${AGH_SERVICE}\.service"; then systemctl restart "$AGH_SERVICE"
+    else "${AGH_DIR}/AdGuardHome" -s install; fi
+    for _ in $(seq 1 20); do curl -fso /dev/null "http://127.0.0.1:${agh_web_port}/" && { agh_up=1; break; }; sleep 0.5; done
+    [[ $agh_up -eq 1 ]] || { msg_err "AdGuard Home did not start"; return 1; }
     mkdir -p /etc/nginx/snippets
     cat > "$AGH_SNIPPET" <<EOF
     location /dns-query {
@@ -674,7 +759,6 @@ INFO
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off;
-        proxy_intercept_errors off;
         access_log off;
     }
     location /${agh_path}/ {
@@ -688,9 +772,6 @@ INFO
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300s;
-        proxy_intercept_errors off;
-        add_header X-Robots-Tag "noindex, nofollow" always;
     }
     location = /${agh_path} { return 302 /${agh_path}/; }
 EOF
@@ -701,49 +782,28 @@ EOF
             sed -i '$ s|^}$|    include /etc/nginx/snippets/adguard.conf;\n}|' "$vhost"
         fi
     fi
-    if nginx -t 2>&1 | grep -q successful; then
-        systemctl reload nginx
-    else
-        msg_err "nginx config test failed after AdGuard include."
-        nginx -t
-        return 1
-    fi
-    AGH_PATH="$agh_path"
-    AGH_USER="$agh_user"
-    AGH_PASS="$agh_pass"
+    nginx -t 2>&1 | grep -q successful && systemctl reload nginx
+    AGH_PATH="$agh_path"; AGH_USER="$agh_user"; AGH_PASS="$agh_pass"
     msg_ok "AdGuard Home installed."
 }
-
 print_adguard_results() {
     local agh_path agh_user agh_pass agh_domain agh_ip H
     H='https://'
     [[ -f /etc/nginx/snippets/adguard.conf ]] || return 0
-    agh_domain="${domain:-}"
-    agh_ip="${IP4:-}"
-    agh_path=""
-    agh_user="admin"
-    agh_pass=""
+    agh_domain="${domain:-}"; agh_ip="${IP4:-}"; agh_path=""; agh_user="admin"; agh_pass=""
     if [[ -f /root/.lucx-adguard-info ]]; then
         . /root/.lucx-adguard-info
-        agh_path="${AGH_PATH:-$agh_path}"
-        agh_user="${AGH_USER:-$agh_user}"
-        agh_pass="${AGH_PASS:-}"
-        agh_domain="${AGH_DOMAIN:-$agh_domain}"
-        agh_ip="${AGH_IP:-$agh_ip}"
+        agh_path="${AGH_PATH:-$agh_path}"; agh_user="${AGH_USER:-$agh_user}"
+        agh_pass="${AGH_PASS:-}"; agh_domain="${AGH_DOMAIN:-$agh_domain}"; agh_ip="${AGH_IP:-$agh_ip}"
     fi
-    if [[ -z "$agh_path" ]]; then
-        agh_path=$(grep -oP 'location /\Kadg-[a-zA-Z0-9]+' /etc/nginx/snippets/adguard.conf | head -1 || true)
-    fi
+    [[ -z "$agh_path" ]] && agh_path=$(grep -oP 'location /\Kadg-[a-zA-Z0-9]+' /etc/nginx/snippets/adguard.conf | head -1 || true)
     [[ -n "$agh_domain" ]] || return 0
     echo
     msg_inf '────────────────────────────────────────────────────────────────────────────────'
     echo -e "AdGuard Home:  ${H}${agh_domain}/${agh_path}/\n"
     echo -e "Login:         ${agh_user}\n"
-    if [[ -n "$agh_pass" ]]; then
-        echo -e "Password:      ${agh_pass}\n"
-    else
-        echo -e "Password:      (already set / bcrypt in AdGuardHome.yaml)\n"
-    fi
+    if [[ -n "$agh_pass" ]]; then echo -e "Password:      ${agh_pass}\n"
+    else echo -e "Password:      (already set / bcrypt in AdGuardHome.yaml)\n"; fi
     echo -e "DoH:           ${H}${agh_domain}/dns-query\n"
     echo -e "Hosts:         ${agh_domain} ${agh_ip}\n"
     msg_inf '────────────────────────────────────────────────────────────────────────────────'
@@ -1223,20 +1283,18 @@ configure_xui_db() {
 
     x-ui stop 2>/dev/null || true
 
-    local output private_key public_key salamander_pass emoji_flag xray_bin
+    local output private_key public_key emoji_flag xray_bin
     xray_bin="/usr/local/x-ui/bin/xray-linux-$(_arch)"
     [[ -f "$xray_bin" ]] || xray_bin="/usr/local/x-ui/bin/xray-linux-arm32"
     [[ -f "$xray_bin" ]] || xray_bin="/usr/local/x-ui/bin/xray-linux-arm"
     output=$("$xray_bin" x25519)
     private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
     public_key=$(echo "$output"  | grep "^Password"   | awk '{print $3}')
-    salamander_pass=$(gen_random_string 16)
-    local gid_col="" gid_reality="" gid_xhttp="" gid_hy2=""
+    local gid_col="" gid_reality="" gid_xhttp=""
     if sqlite3 "$XUIDB" "PRAGMA table_info(hosts);" | grep -qw "group_id"; then
         gid_col='"group_id",'
         gid_reality="'$(gen_group_id)',"
         gid_xhttp="'$(gen_group_id)',"
-        gid_hy2="'$(gen_group_id)',"
     fi
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s --max-time 10 https://ipwho.is/ | jq -r '.flag.emoji' 2>/dev/null)
     [[ -z "$emoji_flag" || "$emoji_flag" == "null" ]] && emoji_flag="🌐"
@@ -1379,68 +1437,10 @@ VALUES (
     '{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
 );
 
-INSERT INTO "inbounds"
-    ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing")
-VALUES (
-    '1','0','0','0','${emoji_flag} hy2','1','0','','${hy2_port}','hysteria',
-    '{
-  "version": 2,
-  "clients": []
-}',
-    '{
-  "network": "hysteria",
-  "security": "tls",
-  "hysteriaSettings": {
-    "version": 2,
-    "udpIdleTimeout": 60
-  },
-  "tlsSettings": {
-    "serverName": "${domain}",
-    "minVersion": "1.2",
-    "maxVersion": "1.3",
-    "cipherSuites": "",
-    "rejectUnknownSni": false,
-    "disableSystemRoot": false,
-    "enableSessionResumption": false,
-    "certificates": [
-      {
-        "certificateFile": "/root/cert/${domain}/fullchain.pem",
-        "keyFile": "/root/cert/${domain}/privkey.pem",
-        "ocspStapling": 0,
-        "oneTimeLoading": false,
-        "usage": "encipherment",
-        "buildChain": false
-      }
-    ],
-    "alpn": ["h3"],
-    "echServerKeys": "",
-    "settings": {
-      "fingerprint": "firefox",
-      "echConfigList": "",
-      "pinnedPeerCertSha256": [],
-      "verifyPeerCertByName": ""
-    }
-  },
-  "finalmask": {
-    "udp": [
-      {
-        "type": "salamander",
-        "settings": {
-          "password": "${salamander_pass}"
-        }
-      }
-    ]
-  }
-}',
-    'inbound-${hy2_port}',
-    '{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
-);
-
 INSERT INTO "hosts" ("inbound_id",${gid_col}"sort_order","remark","address","port","security","fingerprint","alpn")
 VALUES
     ((SELECT id FROM inbounds WHERE tag='inbound-8443'),           ${gid_reality} 0, 'tcp-reality', '${domain}', 443, 'same', '',        '[]'),
-    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]'),
-    ((SELECT id FROM inbounds WHERE tag='inbound-${hy2_port}'),     ${gid_hy2}     0, 'hy2', '${domain}', ${hy2_port}, 'same', 'firefox', '["h3"]');
+    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]');
 EOF
 
     /usr/local/x-ui/x-ui setting \
@@ -1551,13 +1551,13 @@ setup_firewall() {
     ufw allow 22/tcp
     ufw allow 80/tcp
     ufw allow 443/tcp
-    ufw allow 443/udp
-    ufw allow ${hy2_port}/udp
+    if [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]]; then
+        ufw allow ${hy2_port}/udp
+    fi
     if [[ "${EXTRA_INBOUND:-1}" == "2" ]]; then
         ufw allow 56000/udp
         ufw allow 56001/udp
         ufw allow 56003/udp
-        ufw allow 56000/tcp
     elif [[ "${EXTRA_INBOUND:-1}" == "3" ]]; then
         ufw allow 46000/udp
     fi
@@ -1591,6 +1591,7 @@ show_results() {
 main() {
     choose_adguard
     choose_xray_dns
+    choose_hysteria2
     choose_extra_inbound
     validate_domains
     clean_previous_install
@@ -1620,6 +1621,7 @@ main() {
     x-ui restart
 
     apply_xray_dns
+    insert_hy2_inbound
     insert_extra_inbound
     x-ui restart
 
