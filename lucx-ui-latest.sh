@@ -606,6 +606,7 @@ db, proto, remark, port, listen_addr, sub_host, password = sys.argv[1:8]
 port = int(port)
 if proto == "qwdtt":
     settings = {
+        "clients": [],
         "listenAddr": listen_addr,
         "wgPort": 56001,
         "password": password,
@@ -622,6 +623,7 @@ if proto == "qwdtt":
     }
 else:
     settings = {
+        "clients": [],
         "listenAddr": listen_addr,
         "password": password,
         "deviceId": "",
