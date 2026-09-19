@@ -24,21 +24,22 @@
 
 ## Установка
 
-**Шаг 1 — скачать скрипт**
+**Скачивание и запуск скрипта**
 
 ```bash
-wget -qO x-ui-latest.sh https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-latest.sh
+wget -qO lucx-ui-latest.sh https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh
+bash lucx-ui-latest.sh -install y -subdomain panel.example.com -reality_domain r.example.com
 ```
 
-**Шаг 2 — запустить**
+**Полное удаление (панель + nginx + AdGuard)**
 
 ```bash
-bash x-ui-latest.sh
+bash lucx-ui-latest.sh -uninstall y
 ```
 
 ---
 
-## AdGuard Home (опционально)
+## AdGuard Home (опционально;поверх панели)
 
 Устанавливает [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) на домен панели — без отдельного домена и открытых портов, всё через существующий 443:
 
@@ -46,7 +47,7 @@ bash x-ui-latest.sh
 - **Админка** — на случайном пути `/adg-<random>/` (логин и пароль выводит скрипт)
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-adguard.sh)
+bash lucx-ui-latest.sh -adguard y
 ```
 
 Повторный запуск безопасен (настройки и пароль сохраняются). После установщика или патча запустите скрипт ещё раз — они перезаписывают конфиг nginx.
@@ -54,7 +55,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-
 Удаление:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-adguard.sh) -uninstall y
+bash lucx-ui-latest.sh -adguard-uninstall y
 ```
 
 ---
@@ -63,12 +64,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-
 
 | Параметр | Описание |
 |----------|----------|
-| `-install n` | Пропустить установку системных пакетов (по умолчанию `y`) |
+| `-install y` | Полная установка |
 | `-subdomain <домен>` | Домен панели и подписок |
 | `-reality_domain <домен>` | Домен назначения для REALITY |
-| `-auto_domain y` | Автоопределение домена (без ручного ввода) |
 | `-version <версия>` | Установить конкретную версию lucx-ui (например `v3.8.5-lucx.245`), по умолчанию — последняя |
 | `-uninstall y` | Полное удаление |
+| `-adguard y` | Установка AdGuard (поверх панели; панель не трогать) |
+| `-adguard-uninstall y` | Удаление только AdGuard (поверх панели; панель не трогать) |
 
 ---
 
