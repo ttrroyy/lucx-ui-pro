@@ -39,7 +39,7 @@ bash lucx-ui-latest.sh -uninstall y
 
 ---
 
-## AdGuard Home (опционально;поверх панели)
+## AdGuard Home (опционально; поверх панели)
 
 Устанавливает [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) на домен панели — без отдельного домена и открытых портов, всё через существующий 443:
 
