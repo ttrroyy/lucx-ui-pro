@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Up in the Clouds — CloudNine Solutions</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, #a8d8f0 0%, #c8eafb 40%, #e8f6ff 70%, #ffffff 100%);
+    color: #1a3a5c;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  /* Cloud shapes using CSS */
+  .clouds-layer {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 100%;
+    pointer-events: none;
+  }
+  .cloud {
+    position: absolute;
+    background: rgba(255,255,255,0.7);
+    border-radius: 999px;
+    animation: drift linear infinite;
+  }
+  .cloud::before, .cloud::after {
+    content: '';
+    position: absolute;
+    background: inherit;
+    border-radius: 50%;
+  }
+  .c1 { width: 160px; height: 50px; top: 10%; left: -200px; animation-duration: 35s; animation-delay: 0s; }
+  .c1::before { width: 80px; height: 80px; top: -40px; left: 20px; }
+  .c1::after { width: 60px; height: 60px; top: -30px; left: 70px; }
+  .c2 { width: 120px; height: 38px; top: 22%; left: -160px; animation-duration: 45s; animation-delay: 8s; opacity: 0.5; }
+  .c2::before { width: 60px; height: 60px; top: -30px; left: 15px; }
+  .c2::after { width: 50px; height: 50px; top: -25px; left: 55px; }
+  .c3 { width: 200px; height: 60px; top: 8%; left: -250px; animation-duration: 55s; animation-delay: 15s; opacity: 0.4; }
+  .c3::before { width: 100px; height: 100px; top: -55px; left: 25px; }
+  .c3::after { width: 80px; height: 80px; top: -45px; left: 90px; }
+  .c4 { width: 100px; height: 32px; top: 35%; left: -150px; animation-duration: 40s; animation-delay: 5s; opacity: 0.6; }
+  .c4::before { width: 50px; height: 50px; top: -25px; left: 12px; }
+  .c4::after { width: 40px; height: 40px; top: -20px; left: 45px; }
+  @keyframes drift {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(100vw + 300px)); }
+  }
+  .container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 3rem 2rem;
+    max-width: 620px;
+  }
+  .logo-area {
+    margin-bottom: 2rem;
+  }
+  .logo-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: rgba(255,255,255,0.8);
+    border: 1px solid rgba(100,180,240,0.4);
+    padding: 0.5rem 1.25rem;
+    border-radius: 999px;
+    box-shadow: 0 2px 15px rgba(80,160,230,0.15);
+  }
+  .logo-icon { font-size: 1.3rem; }
+  .logo-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1a5a9a;
+    letter-spacing: 0.1em;
+  }
+  h1 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 700;
+    color: #0d2d4a;
+    line-height: 1.1;
+    margin-bottom: 0.5rem;
+    text-shadow: 0 2px 10px rgba(255,255,255,0.8);
+  }
+  .h1-sub { color: #2a7abf; }
+  .tagline {
+    font-size: 1rem;
+    color: #4a7a9a;
+    margin-bottom: 2.5rem;
+    font-style: italic;
+  }
+  .glass-card {
+    background: rgba(255,255,255,0.65);
+    border: 1px solid rgba(160,210,240,0.5);
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 32px rgba(100,160,220,0.12);
+    margin-bottom: 2rem;
+  }
+  .glass-card p {
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: #2a4a6a;
+    margin-bottom: 0.5rem;
+  }
+  .glass-card p:last-child { margin-bottom: 0; }
+  .feature-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .feat {
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(100,180,240,0.3);
+    border-radius: 10px;
+    padding: 0.75rem 1.1rem;
+    font-size: 0.78rem;
+    color: #1a5a9a;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .feat span { display: block; font-size: 1.2rem; margin-bottom: 0.25rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="clouds-layer">
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="cloud c3"></div>
+  <div class="cloud c4"></div>
+</div>
+<div class="container">
+  <div class="logo-area">
+    <div class="logo-pill">
+      <span class="logo-icon">&#x2601;</span>
+      <span class="logo-name">CloudNine Solutions</span>
+    </div>
+  </div>
+  <h1>Up in the<br><span class="h1-sub">Clouds</span></h1>
+  <div class="tagline">We're migrating to something that lives higher.</div>
+  <div class="glass-card">
+    <p>Our platform is currently undergoing a major cloud infrastructure upgrade. We're moving everything to a distributed, globally-replicated system designed for the next decade.</p>
+    <p>Your data is safe, your services will resume shortly, and the experience on the other side will be noticeably better.</p>
+  </div>
+  <div class="feature-row">
+    <div class="feat"><span>&#x26A1;</span>3x Faster</div>
+    <div class="feat"><span>&#x1F6E1;</span>99.9% Uptime</div>
+    <div class="feat"><span>&#x1F30D;</span>Global CDN</div>
+    <div class="feat"><span>&#x1F512;</span>Zero-Trust</div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Almost Ready...</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f0f2f5;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+  .card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 40px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+    padding: 3rem 2.5rem;
+    max-width: 500px;
+    width: 100%;
+  }
+  .icon-area {
+    width: 64px; height: 64px;
+    background: #eef1f8;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+    font-size: 1.8rem;
+  }
+  .company {
+    font-size: 0.68rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6b7c9e;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: #1a2440;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.5px;
+  }
+  p {
+    font-size: 0.93rem;
+    color: #7080a0;
+    line-height: 1.8;
+    margin-bottom: 2rem;
+  }
+  .progress-section { margin-bottom: 1.5rem; }
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.73rem;
+    color: #8898b8;
+    margin-bottom: 0.5rem;
+  }
+  .progress-track {
+    height: 6px;
+    background: #e8edf8;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    animation: grow var(--dur) ease-out forwards;
+  }
+  .fill-1 { background: linear-gradient(90deg, #4a6ef5, #7090ff); --dur: 1.5s; }
+  .fill-2 { background: linear-gradient(90deg, #4a6ef5, #7090ff); --dur: 2s; }
+  .fill-3 { background: linear-gradient(90deg, #4a6ef5, #7090ff); --dur: 2.8s; }
+  @keyframes grow { from { width: 0; } }
+  .fill-1 { width: 100%; }
+  .fill-2 { width: 78%; }
+  .fill-3 { width: 45%; }
+  .divider { height: 1px; background: #eef0f8; margin-bottom: 1.5rem; }
+  .footer-card {
+    font-size: 0.7rem;
+    color: #b0b8d0;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-area">&#128640;</div>
+    <p class="company">Apex Digital</p>
+    <h1>Almost Ready...</h1>
+    <p>We're putting the final pieces in place before our big launch. Things are looking great — just a little longer.</p>
+    <div class="progress-section">
+      <div class="progress-label"><span>Design</span><span>100%</span></div>
+      <div class="progress-track"><div class="progress-fill fill-1"></div></div>
+      <div class="progress-label"><span>Development</span><span>78%</span></div>
+      <div class="progress-track"><div class="progress-fill fill-2"></div></div>
+      <div class="progress-label"><span>Content &amp; Testing</span><span>45%</span></div>
+      <div class="progress-track"><div class="progress-fill fill-3"></div></div>
+    </div>
+    <div class="divider"></div>
+    <p class="footer-card">Apex Digital &copy; 2025 &nbsp;&mdash;&nbsp; Expected launch: Q3 2025</p>
+  </div>
+</body>
+</html>

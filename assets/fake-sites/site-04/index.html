@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alex Chen — Portfolio Coming Soon</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(160deg, #1a0533 0%, #2d1055 50%, #1e0840 100%);
+    font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+  }
+  @media (max-width: 700px) {
+    body { grid-template-columns: 1fr; padding: 3rem 2rem; }
+    .right { display: none; }
+  }
+  .left {
+    padding: 4rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #b07eff;
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    font-size: clamp(2rem, 4vw, 3.5rem);
+    color: #ffffff;
+    line-height: 1.15;
+    font-weight: 400;
+    margin-bottom: 0.5rem;
+  }
+  h1 em {
+    font-style: italic;
+    color: #c89fff;
+  }
+  .role {
+    font-size: 0.9rem;
+    color: #9b6fcc;
+    letter-spacing: 0.1em;
+    margin-bottom: 2rem;
+  }
+  p {
+    font-size: 1rem;
+    color: #c4a8e8;
+    line-height: 1.9;
+    max-width: 380px;
+    margin-bottom: 2.5rem;
+  }
+  .divider {
+    width: 40px;
+    height: 1px;
+    background: #7c3aed;
+    margin-bottom: 2.5rem;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: rgba(124, 58, 237, 0.2);
+    border: 1px solid rgba(124, 58, 237, 0.5);
+    padding: 0.5rem 1.2rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #b07eff;
+    letter-spacing: 0.08em;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    background: #7c3aed;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .right {
+    padding: 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .art {
+    width: 260px; height: 320px;
+    border: 1px solid rgba(124,58,237,0.4);
+    border-radius: 8px;
+    background: rgba(124,58,237,0.08);
+    position: relative;
+    overflow: hidden;
+  }
+  .art::before {
+    content: '';
+    position: absolute;
+    top: -40%; left: -40%;
+    width: 180%; height: 180%;
+    background: radial-gradient(circle, rgba(124,58,237,0.3) 0%, transparent 65%);
+  }
+  .art-label {
+    position: absolute;
+    bottom: 1.2rem; left: 1.2rem;
+    font-size: 0.7rem;
+    color: rgba(176,126,255,0.5);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+  <div class="left">
+    <p class="eyebrow">Portfolio</p>
+    <h1>Alex Chen &mdash;<br><em>Designer</em></h1>
+    <p class="role">UI / UX &nbsp;&bull;&nbsp; Brand Identity &nbsp;&bull;&nbsp; Motion</p>
+    <div class="divider"></div>
+    <p>
+      Something carefully crafted is on the way. A new portfolio showcasing
+      the intersection of form, function, and feeling. Coming soon.
+    </p>
+    <span class="status"><span class="dot"></span>Currently in development</span>
+  </div>
+  <div class="right">
+    <div class="art">
+      <div class="art-label">Work preview</div>
+    </div>
+  </div>
+</body>
+</html>

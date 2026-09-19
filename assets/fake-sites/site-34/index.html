@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Collection Preview Coming</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Arial Narrow', 'Arial', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .noise {
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+  .accent-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #ff2d6b, #ff0055, #ff2d6b);
+    box-shadow: 0 0 20px #ff0055;
+  }
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 700px;
+    padding: 3rem 2rem;
+    width: 100%;
+  }
+  .top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4rem;
+  }
+  .studio-name {
+    font-size: 0.7rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #555;
+  }
+  .pink-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #ff0055;
+    box-shadow: 0 0 12px #ff0055;
+    animation: pdot 2s ease-in-out infinite alternate;
+  }
+  @keyframes pdot {
+    from { box-shadow: 0 0 8px #ff0055; }
+    to { box-shadow: 0 0 25px #ff0055, 0 0 50px rgba(255,0,85,0.3); }
+  }
+  .tag {
+    font-size: 0.65rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #ff2d6b;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 900;
+    line-height: 0.9;
+    text-transform: uppercase;
+    color: #f0f0f0;
+    letter-spacing: -0.02em;
+    margin-bottom: 2rem;
+  }
+  h1 .pink { color: #ff0055; text-shadow: 0 0 30px rgba(255,0,85,0.5); }
+  .body-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 3rem;
+    flex-wrap: wrap;
+  }
+  .body-text {
+    flex: 1;
+    min-width: 220px;
+  }
+  p {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: #888;
+    margin-bottom: 0.75rem;
+  }
+  .side-counter {
+    min-width: 120px;
+    text-align: right;
+  }
+  .big-num {
+    font-size: 5rem;
+    font-weight: 900;
+    line-height: 1;
+    color: transparent;
+    -webkit-text-stroke: 1px #333;
+    letter-spacing: -0.05em;
+  }
+  .num-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #ff2d6b;
+    text-align: right;
+  }
+  .bottom-strip {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    padding: 0 2rem;
+    background: #111;
+    border-top: 1px solid #222;
+  }
+  .marquee-text {
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    animation: marquee 20s linear infinite;
+  }
+  @keyframes marquee {
+    from { transform: translateX(100vw); }
+    to { transform: translateX(-100%); }
+  }
+</style>
+</head>
+<body>
+<div class="noise"></div>
+<div class="accent-bar"></div>
+<div class="container">
+  <div class="top-row">
+    <div class="studio-name">Voss &amp; Crane Photography</div>
+    <div class="pink-dot"></div>
+  </div>
+  <div class="tag">// Portfolio Update</div>
+  <h1>New<br><span class="pink">Collection</span><br>Preview<br>Coming</h1>
+  <div class="body-row">
+    <div class="body-text">
+      <p>We are preparing an entirely new body of work for your eyes. Portraits, landscapes, editorial — all reimagined through a different lens.</p>
+      <p>Our new portfolio site is being built with care. Every image handpicked. Every layout deliberate.</p>
+    </div>
+    <div class="side-counter">
+      <div class="big-num">024</div>
+      <div class="num-label">Images Ready</div>
+    </div>
+  </div>
+</div>
+<div class="bottom-strip">
+  <div class="marquee-text">Voss &amp; Crane Photography &nbsp;&#x2022;&nbsp; New Collection Preview Coming &nbsp;&#x2022;&nbsp; Stay Tuned &nbsp;&#x2022;&nbsp; Fine Art &amp; Editorial &nbsp;&#x2022;&nbsp; Portraits &nbsp;&#x2022;&nbsp; Commercial Work &nbsp;&#x2022;&nbsp;</div>
+</div>
+</body>
+</html>

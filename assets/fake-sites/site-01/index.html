@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus Systems — Coming Soon</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: #0a0f2c;
+    color: #e8eaf6;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+  }
+  .logo-mark {
+    width: 64px; height: 64px;
+    border: 3px solid #5c7cfa;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 2rem;
+    font-size: 1.8rem; font-weight: 900; color: #5c7cfa;
+    letter-spacing: -2px;
+  }
+  h1 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: #ffffff;
+    margin-bottom: 0.5rem;
+  }
+  .tagline {
+    font-size: 1.1rem;
+    color: #8892b0;
+    margin-bottom: 3rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .countdown {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 3rem;
+  }
+  .unit {
+    background: rgba(92, 124, 250, 0.1);
+    border: 1px solid rgba(92, 124, 250, 0.3);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    min-width: 90px;
+  }
+  .unit .number {
+    display: block;
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #5c7cfa;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .unit .label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #8892b0;
+    margin-top: 0.4rem;
+  }
+  .divider {
+    width: 60px; height: 2px;
+    background: linear-gradient(90deg, transparent, #5c7cfa, transparent);
+    margin: 0 auto 2rem;
+  }
+  .company {
+    font-size: 0.85rem;
+    color: #8892b0;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+  .company span { color: #5c7cfa; }
+</style>
+</head>
+<body>
+  <div class="logo-mark">NX</div>
+  <p class="tagline">Something big is on its way</p>
+  <h1>Coming Soon</h1>
+  <div class="divider"></div>
+  <div class="countdown">
+    <div class="unit"><span class="number" id="days">00</span><span class="label">Days</span></div>
+    <div class="unit"><span class="number" id="hours">00</span><span class="label">Hours</span></div>
+    <div class="unit"><span class="number" id="mins">00</span><span class="label">Minutes</span></div>
+    <div class="unit"><span class="number" id="secs">00</span><span class="label">Seconds</span></div>
+  </div>
+  <p class="company"><span>Nexus Systems</span> &mdash; Redefining Infrastructure</p>
+  <script>
+    var target = new Date();
+    target.setDate(target.getDate() + 47);
+    function tick() {
+      var diff = target - new Date();
+      if (diff < 0) return;
+      document.getElementById('days').textContent = String(Math.floor(diff / 86400000)).padStart(2,'0');
+      document.getElementById('hours').textContent = String(Math.floor(diff % 86400000 / 3600000)).padStart(2,'0');
+      document.getElementById('mins').textContent = String(Math.floor(diff % 3600000 / 60000)).padStart(2,'0');
+      document.getElementById('secs').textContent = String(Math.floor(diff % 60000 / 1000)).padStart(2,'0');
+    }
+    tick(); setInterval(tick, 1000);
+  </script>
+</body>
+</html>

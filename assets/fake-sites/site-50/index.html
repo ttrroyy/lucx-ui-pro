@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Chapter, Coming Soon — Aurore</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  min-height:100vh;
+  background:linear-gradient(135deg,#fce4ec 0%,#f8bbd9 30%,#ffd6c8 70%,#ffe4d6 100%);
+  font-family:'Garamond','Georgia',serif;
+  display:flex;flex-direction:column;
+}
+.header{
+  padding:28px 40px;display:flex;justify-content:space-between;align-items:center;
+}
+.brand{font-size:1.1rem;font-weight:normal;letter-spacing:0.25em;color:#8b4060}
+.nav-hint{font-size:0.75rem;letter-spacing:0.15em;color:#c08090}
+.main{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  padding:40px 24px;
+}
+.content{
+  max-width:580px;text-align:center;
+}
+.overline{
+  font-size:0.7rem;letter-spacing:0.4em;text-transform:uppercase;
+  color:#c08090;margin-bottom:24px;font-family:'Trebuchet MS',Arial,sans-serif;
+}
+h1{
+  font-size:clamp(2.2rem,5vw,3.6rem);font-weight:normal;
+  color:#5a1a30;line-height:1.25;margin-bottom:24px;
+  font-style:italic;
+}
+.flourish{
+  display:flex;align-items:center;gap:16px;justify-content:center;
+  margin-bottom:24px;
+}
+.fl-line{flex:1;max-width:80px;height:1px;background:linear-gradient(90deg,transparent,#d4899a)}
+.fl-line.r{background:linear-gradient(90deg,#d4899a,transparent)}
+.fl-diamond{width:6px;height:6px;background:#d4899a;transform:rotate(45deg)}
+.tagline{
+  font-size:1rem;line-height:1.9;color:#8b4060;
+  margin-bottom:36px;
+}
+.pill{
+  display:inline-block;
+  background:rgba(255,255,255,0.6);backdrop-filter:blur(4px);
+  border:1px solid rgba(212,137,154,0.4);
+  padding:10px 28px;border-radius:50px;
+  font-size:0.85rem;letter-spacing:0.1em;color:#8b4060;
+  font-family:'Trebuchet MS',Arial,sans-serif;
+}
+.circles{
+  position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:0;
+}
+.circle{
+  position:absolute;border-radius:50%;
+  background:rgba(255,255,255,0.25);
+}
+.c1{width:500px;height:500px;top:-200px;right:-150px}
+.c2{width:300px;height:300px;bottom:-100px;left:-80px;background:rgba(255,200,220,0.3)}
+.c3{width:180px;height:180px;top:40%;left:5%;background:rgba(255,230,240,0.4)}
+.footer{padding:20px 40px;text-align:center;font-size:0.75rem;color:#c08090;letter-spacing:0.1em;position:relative;z-index:1}
+.content{position:relative;z-index:1}
+</style>
+</head>
+<body>
+<div class="circles">
+  <div class="circle c1"></div>
+  <div class="circle c2"></div>
+  <div class="circle c3"></div>
+</div>
+<div class="header">
+  <div class="brand">Rosé &amp; Co.</div>
+  <div class="nav-hint">A New Chapter</div>
+</div>
+<div class="main">
+  <div class="content">
+    <div class="overline">Coming Soon</div>
+    <h1>A New Chapter,<br>Coming Soon</h1>
+    <div class="flourish">
+      <span class="fl-line"></span>
+      <span class="fl-diamond"></span>
+      <span class="fl-line r"></span>
+    </div>
+    <p class="tagline">We're reimagining our corner of the world.<br>A fresh space, a new story — curated with love and intention.</p>
+    <div class="pill">Back Soon &nbsp;&mdash;&nbsp; Thank You for Waiting</div>
+  </div>
+</div>
+<div class="footer">&copy; 2026 Rosé &amp; Co. &nbsp;&bull;&nbsp; All rights reserved</div>
+</body>
+</html>

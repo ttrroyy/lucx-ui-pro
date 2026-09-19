@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Studio Minimal — New Website In Progress</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+  }
+  body {
+    background: #ffffff;
+    color: #111111;
+    font-family: 'Optima', 'Candara', 'Gill Sans MT', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+  .top-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: #111111;
+  }
+  .mark {
+    width: 32px; height: 32px;
+    background: #111;
+    margin: 0 auto 4rem;
+  }
+  h1 {
+    font-size: clamp(1.1rem, 3vw, 1.5rem);
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #111;
+    margin-bottom: 2rem;
+  }
+  .thin-line {
+    width: 1px;
+    height: 60px;
+    background: #111;
+    margin: 0 auto 2rem;
+  }
+  .byline {
+    font-size: 0.7rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #999;
+  }
+  .byline strong {
+    color: #111;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="top-bar"></div>
+  <div class="mark"></div>
+  <h1>New website in progress</h1>
+  <div class="thin-line"></div>
+  <p class="byline"><strong>Studio Minimal</strong> &mdash; Design &amp; Direction</p>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Website in Press</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f8f6f1;
+    color: #111;
+    font-family: 'Times New Roman', Times, serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .masthead {
+    border-bottom: 6px double #111;
+    padding: 1.5rem 3rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .edition {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: #444;
+    font-family: 'Arial Narrow', Arial, sans-serif;
+  }
+  .pub-name {
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    text-align: center;
+    flex: 1;
+    font-family: 'Times New Roman', serif;
+    text-transform: uppercase;
+  }
+  .date-col {
+    font-size: 0.7rem;
+    color: #444;
+    text-align: right;
+    font-family: 'Arial Narrow', Arial, sans-serif;
+  }
+  .rule-thick { border: none; border-top: 3px solid #111; margin: 0; }
+  .rule-thin { border: none; border-top: 1px solid #111; margin: 0.2rem 0 0; }
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: 0;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 2rem;
+    width: 100%;
+  }
+  .col {
+    padding: 0 1.25rem;
+  }
+  .col + .col { border-left: 1px solid #aaa; }
+  .headline {
+    font-size: clamp(1.5rem, 3vw, 2.2rem);
+    font-weight: 900;
+    line-height: 1.15;
+    margin-bottom: 0.75rem;
+    text-align: center;
+    font-family: 'Times New Roman', serif;
+  }
+  .deck {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #333;
+    margin-bottom: 1rem;
+    font-style: italic;
+    text-align: center;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 0.75rem;
+  }
+  .body-copy {
+    font-size: 0.88rem;
+    line-height: 1.7;
+    column-count: 1;
+    text-align: justify;
+    hyphens: auto;
+    color: #111;
+  }
+  .body-copy p { margin-bottom: 0.75rem; }
+  .section-head {
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    border-top: 2px solid #111;
+    border-bottom: 1px solid #111;
+    padding: 0.3rem 0;
+    margin-bottom: 0.75rem;
+    font-family: Arial, sans-serif;
+  }
+  .pull-quote {
+    border-top: 2px solid #111;
+    border-bottom: 2px solid #111;
+    padding: 0.75rem 0;
+    margin: 1rem 0;
+    font-size: 1.2rem;
+    font-style: italic;
+    font-weight: bold;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .footer-bar {
+    border-top: 4px double #111;
+    padding: 0.75rem 3rem;
+    font-size: 0.65rem;
+    color: #666;
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  @media (max-width: 600px) {
+    .main { grid-template-columns: 1fr; }
+    .col + .col { border-left: none; border-top: 1px solid #aaa; padding-top: 1.5rem; margin-top: 1rem; }
+    .masthead { padding: 1rem; }
+    .footer-bar { padding: 0.75rem 1rem; }
+  }
+</style>
+</head>
+<body>
+<div class="masthead">
+  <div class="edition">VOL. XXIV &nbsp;&#x2022;&nbsp; NO. 318</div>
+  <div class="pub-name">The Daily Construct</div>
+  <div class="date-col">Est. 2001<br>Digital Edition</div>
+</div>
+<hr class="rule-thick">
+<hr class="rule-thin">
+<main class="main">
+  <div class="col">
+    <div class="section-head">Site Status</div>
+    <div class="body-copy">
+      <p>After extensive deliberation with our editorial and technical teams, it has been determined that the current state of our online presence requires a comprehensive review and overhaul.</p>
+      <p>The press room is active. Typesetters and developers alike are burning the midnight oil to ensure a seamless transition.</p>
+    </div>
+    <div class="pull-quote">"The presses never stop."</div>
+    <div class="body-copy"><p>Expect a fresh layout, improved archives, and restored search functionality upon our return to print.</p></div>
+  </div>
+  <div class="col">
+    <div class="headline">WEBSITE<br>IN PRESS</div>
+    <div class="deck">Our digital edition is currently being typeset and readied for publication. We expect to resume full online service imminently.</div>
+    <div class="body-copy">
+      <p>The management of The Daily Construct wishes to inform all readers and subscribers that this publication's website is temporarily offline as we undertake a significant redesign of our digital infrastructure.</p>
+      <p>This downtime, while regrettable, is necessary in order to bring our readers a significantly improved reading experience. Our archives will be fully preserved and searchable upon relaunch.</p>
+      <p>Subscribers with active accounts need not take any action — all credentials and preferences will be migrated automatically to the new platform.</p>
+    </div>
+  </div>
+  <div class="col">
+    <div class="section-head">From the Editor</div>
+    <div class="body-copy">
+      <p>Change is never easy, but it is often necessary. This redesign represents years of reader feedback distilled into a single coherent vision.</p>
+      <p>We remain committed to the standards of journalism that have guided this publication for over two decades.</p>
+      <p>— <em>The Editor-in-Chief</em></p>
+    </div>
+    <div class="section-head" style="margin-top:1.5rem;">Notice</div>
+    <div class="body-copy">
+      <p>Print edition continues on schedule. Digital access will resume shortly. No subscriptions have been affected.</p>
+    </div>
+  </div>
+</main>
+<div class="footer-bar">
+  <span>&#169; The Daily Construct. All rights reserved.</span>
+  <span>Website temporarily offline &mdash; returning to press shortly</span>
+  <span>Est. 2001</span>
+</div>
+</body>
+</html>

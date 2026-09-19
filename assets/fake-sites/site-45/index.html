@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Thornfield — Under Renovation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0818;
+    color: #f0e0d8;
+    font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .bg-texture {
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(120,20,50,0.5) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 80%, rgba(80,10,30,0.4) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .banner-top {
+    position: relative;
+    z-index: 10;
+    background: #8b1a35;
+    text-align: center;
+    padding: 0.6rem 1rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,220,210,0.9);
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    border-bottom: 1px solid rgba(200,80,100,0.4);
+  }
+  .main {
+    flex: 1;
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+  }
+  .crest {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    text-shadow: 0 0 20px rgba(180,60,80,0.4);
+  }
+  .brand-primary {
+    font-size: 1.8rem;
+    font-weight: normal;
+    letter-spacing: 0.1em;
+    color: #f0ddd5;
+    margin-bottom: 0.3rem;
+  }
+  .brand-secondary {
+    font-size: 0.7rem;
+    letter-spacing: 0.55em;
+    text-transform: uppercase;
+    color: #9b4060;
+    margin-bottom: 2.5rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  .title-block {
+    text-align: center;
+    max-width: 560px;
+  }
+  .overline {
+    font-size: 0.65rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #8b1a35;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 4.5vw, 3rem);
+    font-weight: normal;
+    font-style: italic;
+    line-height: 1.2;
+    color: #f8e8e0;
+    margin-bottom: 0.5rem;
+    text-shadow: 0 2px 15px rgba(0,0,0,0.5);
+  }
+  .rule-dec {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    justify-content: center;
+    margin: 1.5rem 0;
+  }
+  .rule-dec-line { flex: 1; max-width: 80px; height: 1px; background: linear-gradient(90deg, transparent, #6b1a35); }
+  .rule-dec-line.r { background: linear-gradient(90deg, #6b1a35, transparent); }
+  .rule-dec-sym { color: #8b1a35; font-size: 0.8rem; }
+  p {
+    font-size: 0.95rem;
+    line-height: 1.9;
+    color: #c0a898;
+    margin-bottom: 0.75rem;
+    text-align: center;
+  }
+  .info-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: rgba(139,26,53,0.3);
+    border: 1px solid rgba(139,26,53,0.3);
+    margin: 2rem 0;
+    max-width: 500px;
+    width: 100%;
+  }
+  .info-cell {
+    background: rgba(26,8,24,0.8);
+    padding: 1.2rem;
+    text-align: center;
+  }
+  .info-cell-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #7a3050;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    margin-bottom: 0.4rem;
+  }
+  .info-cell-value {
+    font-size: 0.9rem;
+    color: #e0c0c0;
+    font-style: italic;
+  }
+  .apology {
+    font-size: 0.8rem;
+    color: #7a5060;
+    font-style: italic;
+    margin-top: 0.5rem;
+    letter-spacing: 0.05em;
+  }
+  .footer-line {
+    position: relative;
+    z-index: 2;
+    border-top: 1px solid rgba(139,26,53,0.3);
+    text-align: center;
+    padding: 1rem;
+    font-size: 0.68rem;
+    color: #6a3040;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+</style>
+</head>
+<body>
+<div class="bg-texture"></div>
+<div class="banner-top">&#x26A0; Site Under Renovation &nbsp;&#x2014;&nbsp; We Apologise for the Disruption</div>
+<div class="main">
+  <div class="crest">&#x1F3F0;</div>
+  <div class="brand-primary">The Thornfield</div>
+  <div class="brand-secondary">Hotel &amp; Event Venue &nbsp;&#x2022;&nbsp; Est. 1892</div>
+  <div class="title-block">
+    <div class="overline">Notice to Our Guests</div>
+    <h1>Our Website Is Currently<br>Under Renovation</h1>
+    <div class="rule-dec">
+      <span class="rule-dec-line"></span>
+      <span class="rule-dec-sym">&#x2666;</span>
+      <span class="rule-dec-line r"></span>
+    </div>
+    <p>The Thornfield is undergoing a full renovation of our online presence. Our new website will reflect the updated look and feel of our recently restored interiors.</p>
+    <p>We sincerely apologise for any disruption to your booking experience. Our reservations team remains fully operational and available to assist you directly.</p>
+    <div class="info-strip">
+      <div class="info-cell">
+        <div class="info-cell-label">Reservations</div>
+        <div class="info-cell-value">By telephone</div>
+      </div>
+      <div class="info-cell">
+        <div class="info-cell-label">Site Return</div>
+        <div class="info-cell-value">Within 2 weeks</div>
+      </div>
+      <div class="info-cell">
+        <div class="info-cell-label">Hotel Status</div>
+        <div class="info-cell-value">Open as usual</div>
+      </div>
+      <div class="info-cell">
+        <div class="info-cell-label">Events</div>
+        <div class="info-cell-value">Fully bookable</div>
+      </div>
+    </div>
+    <div class="apology">— The Management of The Thornfield</div>
+  </div>
+</div>
+<div class="footer-line">&#169; The Thornfield Hotel &amp; Venue &nbsp;&#x2022;&nbsp; All rights reserved</div>
+</body>
+</html>

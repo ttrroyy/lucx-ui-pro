@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temporarily Suspended — Hargrove & Associates</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fafcfd;
+    color: #1a2530;
+    font-family: 'Georgia', serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header-bar {
+    background: #1a2530;
+    height: 4px;
+  }
+  .sub-bar {
+    background: #b0c4d4;
+    height: 1px;
+  }
+  .nav-strip {
+    padding: 1.25rem 3rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #d8e4ec;
+  }
+  .firm-name {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #1a2530;
+    font-family: 'Georgia', serif;
+  }
+  .firm-sub {
+    font-size: 0.65rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #8090a0;
+    font-family: Arial, sans-serif;
+  }
+  .stamp {
+    border: 2px solid #b8c8d4;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #8090a0;
+    font-family: Arial, sans-serif;
+  }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+  }
+  .icon-area {
+    margin-bottom: 2.5rem;
+  }
+  .gavel-wrap {
+    width: 64px; height: 64px;
+    border: 2px solid #c8d8e8;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    color: #5878a0;
+    font-size: 1.8rem;
+  }
+  .badge-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+    justify-content: center;
+  }
+  .badge-line { height: 1px; width: 60px; background: #c8d8e8; }
+  .badge-text {
+    font-size: 0.68rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #8090a0;
+    font-family: Arial, sans-serif;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.5rem);
+    font-weight: normal;
+    color: #1a2530;
+    text-align: center;
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.02em;
+  }
+  .ref {
+    font-size: 0.72rem;
+    color: #a0b0c0;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    font-family: Arial, sans-serif;
+    margin-bottom: 2.5rem;
+  }
+  .content-box {
+    max-width: 560px;
+    border: 1px solid #d8e4ec;
+    padding: 2.5rem;
+    background: #fff;
+  }
+  .content-box p {
+    font-size: 0.9rem;
+    line-height: 1.9;
+    color: #3a4a5a;
+    margin-bottom: 0.75rem;
+    text-align: justify;
+  }
+  .content-box .last { margin-bottom: 0; }
+  .divider {
+    height: 1px;
+    background: #d8e4ec;
+    margin: 1.5rem 0;
+  }
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: #8090a0;
+    font-family: Arial, sans-serif;
+    letter-spacing: 0.05em;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .footer-strip {
+    border-top: 1px solid #d8e4ec;
+    padding: 1rem 3rem;
+    font-size: 0.68rem;
+    color: #a0b0c0;
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+<div class="header-bar"></div>
+<div class="sub-bar"></div>
+<div class="nav-strip">
+  <div>
+    <div class="firm-name">Hargrove &amp; Associates</div>
+    <div class="firm-sub">Solicitors &amp; Barristers</div>
+  </div>
+  <div class="stamp">Est. 1987</div>
+</div>
+<div class="main">
+  <div class="icon-area">
+    <div class="gavel-wrap">&#x2696;</div>
+  </div>
+  <div class="badge-row">
+    <div class="badge-line"></div>
+    <div class="badge-text">Official Notice</div>
+    <div class="badge-line"></div>
+  </div>
+  <h1>Temporarily Suspended</h1>
+  <div class="ref">REF: HGA-SITE-2024-11 &nbsp;&#x2022;&nbsp; Web Services</div>
+  <div class="content-box">
+    <p>The online portal for Hargrove &amp; Associates is currently suspended pending a comprehensive review and migration to a new case management platform.</p>
+    <p>During this period, all client matters will be handled through direct correspondence with your assigned solicitor. All existing case files, documentation, and correspondence remain fully accessible to the firm's staff.</p>
+    <p class="last">We anticipate the portal to be restored within five to seven business days. We thank you for your understanding and patience during this transition.</p>
+    <div class="divider"></div>
+    <div class="meta-row">
+      <span>Hargrove &amp; Associates LLP</span>
+      <span>Regulated by the SRA</span>
+      <span>Authorised &amp; Regulated</span>
+    </div>
+  </div>
+</div>
+<div class="footer-strip">
+  <span>&#169; Hargrove &amp; Associates LLP. All rights reserved.</span>
+  <span>This website is temporarily suspended.</span>
+</div>
+</body>
+</html>

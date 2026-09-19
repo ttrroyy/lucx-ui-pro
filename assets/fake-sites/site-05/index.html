@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShopNow Store — Maintenance Mode</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(135deg, #ff6b2b 0%, #ff9a44 50%, #ffb347 100%);
+    font-family: 'Gill Sans', 'Gill Sans MT', Calibri, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+  .wrench-icon {
+    font-size: 3.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .store-name {
+    font-size: 0.8rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.8);
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    font-size: clamp(2.2rem, 6vw, 3.8rem);
+    color: #ffffff;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  }
+  .back-soon {
+    font-size: 1.25rem;
+    color: rgba(255,255,255,0.9);
+    margin-bottom: 2.5rem;
+    font-style: italic;
+  }
+  .info-box {
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 12px;
+    padding: 1.5rem 2.5rem;
+    max-width: 420px;
+    color: #fff;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    margin-bottom: 2.5rem;
+  }
+  .info-box strong { display: block; font-size: 0.75rem; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 0.5rem; opacity: 0.7; }
+  .eta {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.65);
+    letter-spacing: 0.08em;
+  }
+</style>
+</head>
+<body>
+  <div class="wrench-icon">&#128295;</div>
+  <p class="store-name">ShopNow Store</p>
+  <h1>Maintenance Mode</h1>
+  <p class="back-soon">We'll be back soon!</p>
+  <div class="info-box">
+    <strong>What's happening?</strong>
+    We're performing scheduled maintenance to improve your shopping experience.
+    All existing orders are safe and processing normally.
+  </div>
+  <p class="eta">Estimated downtime: a few hours &nbsp;&bull;&nbsp; Thank you for your patience</p>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hold Tight — We're Working On It</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a3d47;
+    color: #e0f7fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 3rem 2rem;
+    max-width: 620px;
+  }
+  .spinner-wrap {
+    margin-bottom: 3rem;
+    position: relative;
+    width: 110px;
+    height: 110px;
+  }
+  .ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 4px solid transparent;
+  }
+  .ring-1 {
+    border-top-color: #00bcd4;
+    border-right-color: #00bcd4;
+    animation: spin1 1.4s linear infinite;
+  }
+  .ring-2 {
+    inset: 12px;
+    border-bottom-color: #4dd0e1;
+    border-left-color: #4dd0e1;
+    animation: spin2 1.0s linear infinite reverse;
+  }
+  .ring-3 {
+    inset: 26px;
+    border-top-color: #80deea;
+    animation: spin1 1.8s linear infinite;
+  }
+  .dot {
+    position: absolute;
+    inset: 44px;
+    border-radius: 50%;
+    background: #00bcd4;
+    box-shadow: 0 0 20px #00bcd4;
+    animation: dotpulse 1.4s ease-in-out infinite alternate;
+  }
+  @keyframes spin1 { to { transform: rotate(360deg); } }
+  @keyframes spin2 { to { transform: rotate(360deg); } }
+  @keyframes dotpulse {
+    from { transform: scale(0.7); opacity: 0.6; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #4dd0e1;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 2.8rem);
+    font-weight: 300;
+    color: #e0f7fa;
+    line-height: 1.3;
+    margin-bottom: 1rem;
+  }
+  h1 strong { font-weight: 700; color: #00e5ff; }
+  .divider {
+    width: 40px;
+    height: 3px;
+    background: #00bcd4;
+    border-radius: 2px;
+    margin: 1.5rem auto;
+  }
+  p {
+    font-size: 1rem;
+    line-height: 1.8;
+    color: #80deea;
+    max-width: 420px;
+  }
+  .status-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 2.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .status-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #00bcd4;
+    box-shadow: 0 0 8px #00bcd4;
+    animation: dotpulse 2s ease-in-out infinite alternate;
+  }
+  .status-dot.delayed { background: #ffca28; box-shadow: 0 0 8px #ffca28; animation-delay: 0.6s; }
+  .status-dot.offline { background: #546e7a; box-shadow: none; animation: none; }
+  .status-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    color: #80deea;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="spinner-wrap">
+    <div class="ring ring-1"></div>
+    <div class="ring ring-2"></div>
+    <div class="ring ring-3"></div>
+    <div class="dot"></div>
+  </div>
+  <div class="eyebrow">Scheduled Maintenance</div>
+  <h1>Hold tight,<br><strong>we're working on it.</strong></h1>
+  <div class="divider"></div>
+  <p>Our team is currently performing essential maintenance. Everything will be back online shortly — we appreciate your patience.</p>
+  <div class="status-row">
+    <div class="status-item">
+      <div class="status-dot"></div>
+      <div class="status-label">API Live</div>
+    </div>
+    <div class="status-item">
+      <div class="status-dot delayed"></div>
+      <div class="status-label">Web UI</div>
+    </div>
+    <div class="status-item">
+      <div class="status-dot offline"></div>
+      <div class="status-label">Portal</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platform Migration in Progress</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1c2b45;
+    color: #cdd9ed;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .page {
+    max-width: 680px;
+    width: 100%;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+  .logo-area {
+    margin-bottom: 2.5rem;
+  }
+  .logo-shape {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #243552;
+    border: 1px solid #2e4568;
+    padding: 0.6rem 1.25rem;
+    border-radius: 6px;
+  }
+  .logo-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #4a90d9;
+    box-shadow: 0 0 8px #4a90d9;
+  }
+  .logo-text {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #93b8e0;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 600;
+    color: #e8f0fb;
+    margin-bottom: 0.75rem;
+    line-height: 1.2;
+  }
+  .subtitle {
+    font-size: 1rem;
+    color: #7a9ec4;
+    margin-bottom: 3rem;
+  }
+  .progress-section {
+    background: #1e3050;
+    border: 1px solid #2a4060;
+    border-radius: 10px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    text-align: left;
+  }
+  .progress-label-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+    font-size: 0.85rem;
+  }
+  .progress-label-row .name { color: #93b8e0; }
+  .progress-label-row .pct { color: #4a90d9; font-weight: 700; }
+  .bar-track {
+    height: 8px;
+    background: #142035;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    position: relative;
+  }
+  .bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 12px; height: 100%;
+    background: rgba(255,255,255,0.4);
+    filter: blur(4px);
+  }
+  .b1 { width: 100%; background: linear-gradient(90deg, #2563a8, #4a90d9); }
+  .b2 { width: 87%; background: linear-gradient(90deg, #2563a8, #4a90d9); }
+  .b3 { width: 62%; background: linear-gradient(90deg, #2563a8, #4da6ff); }
+  .b4 { width: 41%; background: linear-gradient(90deg, #1c4a80, #3a7ab8); }
+  .b5 { width: 15%; background: linear-gradient(90deg, #1c3a60, #2a5888); }
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .info-card {
+    background: #1e3050;
+    border: 1px solid #2a4060;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .info-card .label {
+    font-size: 0.68rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #4a7a9b;
+    margin-bottom: 0.4rem;
+  }
+  .info-card .value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #4a90d9;
+  }
+  .footer-note {
+    font-size: 0.8rem;
+    color: #4a6a8a;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="logo-area">
+    <div class="logo-shape">
+      <div class="logo-dot"></div>
+      <span class="logo-text">Bridgepoint Systems</span>
+    </div>
+  </div>
+  <h1>Migrating to a Better Platform</h1>
+  <div class="subtitle">Our team is working to move everything to a faster, more reliable infrastructure.</div>
+
+  <div class="progress-section">
+    <div class="progress-label-row"><span class="name">Database Transfer</span><span class="pct">100%</span></div>
+    <div class="bar-track"><div class="bar-fill b1"></div></div>
+    <div class="progress-label-row"><span class="name">File Storage Migration</span><span class="pct">87%</span></div>
+    <div class="bar-track"><div class="bar-fill b2"></div></div>
+    <div class="progress-label-row"><span class="name">DNS Propagation</span><span class="pct">62%</span></div>
+    <div class="bar-track"><div class="bar-fill b3"></div></div>
+    <div class="progress-label-row"><span class="name">SSL Certificate Renewal</span><span class="pct">41%</span></div>
+    <div class="bar-track"><div class="bar-fill b4"></div></div>
+    <div class="progress-label-row"><span class="name">Final Testing</span><span class="pct">15%</span></div>
+    <div class="bar-track" style="margin-bottom:0"><div class="bar-fill b5"></div></div>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="label">Overall Progress</div>
+      <div class="value">61%</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Est. Completion</div>
+      <div class="value">~4 hrs</div>
+    </div>
+  </div>
+  <div class="footer-note">All data is being migrated securely. No account information will be lost. We apologise for any inconvenience during this transition.</div>
+</div>
+</body>
+</html>

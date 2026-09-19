@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bloom Wellness — Something Exciting Is Coming</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #fff0f3;
+    font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    top: -120px; right: -120px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, #ffb3c1 0%, transparent 65%);
+    pointer-events: none;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -80px; left: -80px;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, #ffc8d4 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .flower { font-size: 2.8rem; margin-bottom: 0.5rem; }
+  .brand {
+    font-size: 0.72rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #d4788f;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 5vw, 3.2rem);
+    color: #5c1a2e;
+    font-weight: 400;
+    font-style: italic;
+    line-height: 1.25;
+    margin-bottom: 1.5rem;
+  }
+  .sub {
+    font-size: 1rem;
+    color: #b05a70;
+    max-width: 380px;
+    line-height: 1.9;
+    margin-bottom: 2.5rem;
+  }
+  .petal-row {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 2.5rem;
+  }
+  .petal {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #f4a0b5;
+  }
+  .petal:nth-child(2) { background: #f9c0cd; }
+  .petal:nth-child(3) { background: #e8768f; }
+  .petal:nth-child(4) { background: #f9c0cd; }
+  .petal:nth-child(5) { background: #f4a0b5; }
+  .footer-text {
+    font-size: 0.75rem;
+    color: #c4909f;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+  <div class="flower">&#127846;</div>
+  <p class="brand">Bloom Wellness</p>
+  <h1>Something Exciting<br>Is Coming</h1>
+  <p class="sub">
+    We're preparing a holistic wellness experience designed to help you
+    flourish — mind, body, and spirit. Stay tuned for something beautiful.
+  </p>
+  <div class="petal-row">
+    <div class="petal"></div><div class="petal"></div><div class="petal"></div>
+    <div class="petal"></div><div class="petal"></div>
+  </div>
+  <p class="footer-text">Bloom Wellness &nbsp;&mdash;&nbsp; Nourish. Restore. Thrive.</p>
+</body>
+</html>

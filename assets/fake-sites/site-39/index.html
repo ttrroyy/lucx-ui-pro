@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Something Beautiful Is Being Built — Mauve Studio</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #2a1040;
+    color: #e8d5f0;
+    font-family: 'Garamond', 'Georgia', serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .bg-gradient {
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 30% 40%, rgba(100,40,150,0.4) 0%, transparent 55%),
+      radial-gradient(ellipse at 75% 60%, rgba(60,10,90,0.5) 0%, transparent 55%);
+    pointer-events: none;
+  }
+  .layout {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    max-width: 900px;
+    width: 100%;
+    padding: 4rem 2rem;
+    gap: 4rem;
+    align-items: center;
+  }
+  .left-col { }
+  .eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #9b59b6;
+    margin-bottom: 1.5rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  h1 {
+    font-size: clamp(2rem, 3.5vw, 3rem);
+    font-weight: normal;
+    font-style: italic;
+    color: #f0deff;
+    line-height: 1.25;
+    margin-bottom: 1rem;
+  }
+  h1 em { font-style: normal; font-weight: 700; color: #c084fc; }
+  .rule {
+    width: 48px;
+    height: 1px;
+    background: linear-gradient(90deg, #9b59b6, transparent);
+    margin: 1.5rem 0;
+  }
+  p {
+    font-size: 0.98rem;
+    line-height: 1.9;
+    color: #c4a8d8;
+    margin-bottom: 0.75rem;
+  }
+  .services {
+    margin-top: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .service-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.82rem;
+    color: #a87dc0;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    letter-spacing: 0.05em;
+  }
+  .service-item::before {
+    content: '';
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: #9b59b6;
+    flex-shrink: 0;
+  }
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .square-accent {
+    border: 1px solid rgba(155,89,182,0.3);
+    padding: 2rem;
+    position: relative;
+  }
+  .square-accent::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: 20px; right: 20px;
+    height: 1px;
+    background: rgba(155,89,182,0.6);
+  }
+  .accent-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #7a3d9e;
+    margin-bottom: 0.75rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  .accent-quote {
+    font-size: 1.05rem;
+    font-style: italic;
+    color: #d4a8f0;
+    line-height: 1.6;
+  }
+  .status-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  .status-name { color: #b8a0cc; }
+  .status-bar-wrap {
+    flex: 1;
+    margin: 0 1rem;
+    height: 2px;
+    background: rgba(155,89,182,0.15);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .status-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #7b2d9e, #c084fc);
+    border-radius: 1px;
+  }
+  .status-pct { color: #9b59b6; font-size: 0.7rem; }
+  @media (max-width: 640px) {
+    .layout { grid-template-columns: 1fr; gap: 2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-gradient"></div>
+<div class="layout">
+  <div class="left-col">
+    <div class="eyebrow">Mauve Interior Design Studio</div>
+    <h1>Something <em>Beautiful</em><br>Is Being<br>Built</h1>
+    <div class="rule"></div>
+    <p>We are transforming our digital presence to reflect the spaces we create — thoughtful, layered, and alive with intention.</p>
+    <p>Every room we design tells a story. Our new site will tell ours.</p>
+    <div class="services">
+      <div class="service-item">Residential Interior Design</div>
+      <div class="service-item">Commercial Spaces</div>
+      <div class="service-item">Concept &amp; Styling</div>
+      <div class="service-item">Bespoke Furniture Curation</div>
+    </div>
+  </div>
+  <div class="right-col">
+    <div class="square-accent">
+      <div class="accent-label">From the Studio</div>
+      <div class="accent-quote">"Design is not just what it looks like and feels like. Design is how it works."</div>
+    </div>
+    <div class="status-items">
+      <div class="status-row">
+        <span class="status-name">Design System</span>
+        <div class="status-bar-wrap"><div class="status-bar-fill" style="width:90%"></div></div>
+        <span class="status-pct">90%</span>
+      </div>
+      <div class="status-row">
+        <span class="status-name">Portfolio</span>
+        <div class="status-bar-wrap"><div class="status-bar-fill" style="width:75%"></div></div>
+        <span class="status-pct">75%</span>
+      </div>
+      <div class="status-row">
+        <span class="status-name">Development</span>
+        <div class="status-bar-wrap"><div class="status-bar-fill" style="width:55%"></div></div>
+        <span class="status-pct">55%</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

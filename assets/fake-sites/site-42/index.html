@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYSTEM INITIALIZING</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0c0c0c;
+    color: #b0b0b0;
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .terminal {
+    max-width: 680px;
+    width: 100%;
+    padding: 1rem 2rem;
+  }
+  .tbar {
+    background: #2a2a2a;
+    border-radius: 8px 8px 0 0;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid #333;
+    border-bottom: none;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.red { background: #ff5f56; }
+  .dot.yellow { background: #ffbd2e; }
+  .dot.green { background: #27c93f; }
+  .tbar-title { margin-left: auto; color: #555; font-size: 0.75rem; margin-right: auto; }
+  .twindow {
+    background: #111;
+    border: 1px solid #333;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 1.5rem;
+    min-height: 380px;
+  }
+  .line {
+    margin-bottom: 0.2rem;
+    white-space: pre-wrap;
+  }
+  .dim { color: #444; }
+  .normal { color: #888; }
+  .bright { color: #b0b0b0; }
+  .white { color: #d8d8d8; }
+  .green-t { color: #27c93f; }
+  .yellow-t { color: #ffbd2e; }
+  .red-t { color: #ff5f56; }
+  .cyan-t { color: #5fccd4; }
+  .heading {
+    color: #d8d8d8;
+    font-size: 1.5rem;
+    font-weight: bold;
+    letter-spacing: 0.3em;
+    margin: 1rem 0;
+    text-transform: uppercase;
+  }
+  .blink-cursor {
+    display: inline-block;
+    width: 0.6em;
+    height: 1.1em;
+    background: #b0b0b0;
+    vertical-align: text-bottom;
+    animation: blink-cur 1s step-end infinite;
+  }
+  @keyframes blink-cur {
+    50% { opacity: 0; }
+  }
+  .progress-line {
+    color: #27c93f;
+    font-size: 0.9rem;
+  }
+  .boot-art {
+    color: #2a2a2a;
+    font-size: 0.6rem;
+    line-height: 1.1;
+    margin-bottom: 0.5rem;
+  }
+  .separator { color: #333; margin: 0.5rem 0; }
+</style>
+</head>
+<body>
+<div class="terminal">
+  <div class="tbar">
+    <div class="dot red"></div>
+    <div class="dot yellow"></div>
+    <div class="dot green"></div>
+    <div class="tbar-title">init.sh — bash — 80x24</div>
+  </div>
+  <div class="twindow">
+    <div class="line dim">BIOS v2.8.1  Copyright (C) 2024</div>
+    <div class="line dim">CPU: 8x 3.6GHz  RAM: 32768MB  OK</div>
+    <div class="line separator">────────────────────────────────────────────</div>
+    <div class="line bright">Loading kernel module... <span class="green-t">[OK]</span></div>
+    <div class="line bright">Mounting filesystems...  <span class="green-t">[OK]</span></div>
+    <div class="line bright">Starting network services... <span class="green-t">[OK]</span></div>
+    <div class="line bright">Checking disk integrity... <span class="green-t">[OK]</span></div>
+    <div class="line bright">Loading web application... <span class="yellow-t">[WAIT]</span></div>
+    <div class="line dim">  &gt; Unpacking assets...</div>
+    <div class="line dim">  &gt; Compiling templates...</div>
+    <div class="line dim">  &gt; Connecting to database...</div>
+    <div class="line separator">────────────────────────────────────────────</div>
+    <div class="heading">SYSTEM INITIALIZING</div>
+    <div class="line separator">────────────────────────────────────────────</div>
+    <div class="line normal">The system is currently initializing.</div>
+    <div class="line normal">Please wait while all services come online.</div>
+    <div class="line">&nbsp;</div>
+    <div class="line progress-line">[############################..........] 72%</div>
+    <div class="line">&nbsp;</div>
+    <div class="line cyan-t">Estimated time to completion: ~8 minutes</div>
+    <div class="line">&nbsp;</div>
+    <div class="line normal">root@server:~# <span class="blink-cursor"></span></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morning Roast Coffee — We're Brewing Something New</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f5ede0;
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    background-image: radial-gradient(ellipse at top, #f5ede0, #e8d5b5);
+  }
+  .cup-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+  .steam {
+    display: flex;
+    justify-content: center;
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+    height: 20px;
+  }
+  .steam-line {
+    width: 2px;
+    height: 20px;
+    background: linear-gradient(to top, #c8a06a, transparent);
+    border-radius: 999px;
+    animation: rise 2s ease-in-out infinite;
+  }
+  .steam-line:nth-child(2) { animation-delay: 0.4s; height: 14px; }
+  .steam-line:nth-child(3) { animation-delay: 0.8s; height: 17px; }
+  @keyframes rise {
+    0% { transform: translateY(0) scaleX(1); opacity: 0.8; }
+    100% { transform: translateY(-12px) scaleX(1.5); opacity: 0; }
+  }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #8b5e3c;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 5vw, 3.2rem);
+    color: #3d1f0a;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 1.5rem;
+  }
+  h1 em { font-style: italic; color: #7a4520; }
+  .divider {
+    width: 50px;
+    height: 2px;
+    background: #c8a06a;
+    margin: 0 auto 1.5rem;
+  }
+  p {
+    font-size: 1rem;
+    color: #7a5a3a;
+    max-width: 400px;
+    line-height: 1.9;
+    margin-bottom: 2.5rem;
+  }
+  .badge-list {
+    display: flex;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 2.5rem;
+  }
+  .badge {
+    background: #fff8f0;
+    border: 1px solid #d4a878;
+    color: #7a4520;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.9rem;
+    border-radius: 4px;
+    letter-spacing: 0.08em;
+  }
+  .footer {
+    font-size: 0.72rem;
+    color: #b8926a;
+    letter-spacing: 0.12em;
+  }
+</style>
+</head>
+<body>
+  <div class="cup-icon">&#9749;</div>
+  <div class="steam">
+    <div class="steam-line"></div>
+    <div class="steam-line"></div>
+    <div class="steam-line"></div>
+  </div>
+  <p class="brand">Morning Roast Coffee</p>
+  <h1>We're Brewing<br><em>Something New</em></h1>
+  <div class="divider"></div>
+  <p>
+    Our new website is steeping nicely. We'll be ready to share our
+    story, our beans, and our passion for the perfect cup — very soon.
+  </p>
+  <div class="badge-list">
+    <span class="badge">Single Origin</span>
+    <span class="badge">Small Batch</span>
+    <span class="badge">Ethically Sourced</span>
+  </div>
+  <p class="footer">Morning Roast Coffee &copy; 2025 &nbsp;&mdash;&nbsp; Every cup, a ritual</p>
+</body>
+</html>

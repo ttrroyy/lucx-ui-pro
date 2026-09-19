@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Indigo Labs — The Wait Is Almost Over</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0c0820;
+    color: #c8c0f0;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    background-image:
+      radial-gradient(ellipse at 30% 20%, rgba(80,40,180,0.35) 0%, transparent 55%),
+      radial-gradient(ellipse at 70% 80%, rgba(60,20,140,0.4) 0%, transparent 50%);
+    overflow: hidden;
+  }
+  /* Animated ring */
+  .ring-wrap {
+    position: relative;
+    width: 120px; height: 120px;
+    margin: 0 auto 2rem;
+  }
+  .ring-outer {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(120,80,240,0.3);
+    animation: spin-slow 15s linear infinite;
+  }
+  .ring-outer::before {
+    content: '';
+    position: absolute;
+    top: -2px; left: 50%;
+    transform: translateX(-50%);
+    width: 6px; height: 6px;
+    background: #9060f0;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #9060f0;
+  }
+  .ring-middle {
+    position: absolute;
+    inset: 15px;
+    border-radius: 50%;
+    border: 1px solid rgba(100,60,220,0.4);
+    animation: spin-slow 10s linear infinite reverse;
+  }
+  .ring-center {
+    position: absolute;
+    inset: 35px;
+    border-radius: 50%;
+    background: rgba(90,50,200,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+  }
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #6040c0;
+    margin-bottom: 0.5rem;
+  }
+  .brand-lg {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #9070e0;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(2rem, 5.5vw, 3.8rem);
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.1;
+    margin-bottom: 1rem;
+    letter-spacing: -1px;
+  }
+  h1 .accent {
+    color: #9060f0;
+    text-shadow: 0 0 30px rgba(144,96,240,0.5);
+  }
+  .sub {
+    font-size: 1rem;
+    color: #7060b0;
+    max-width: 420px;
+    line-height: 1.85;
+    margin: 1rem auto 3rem;
+  }
+  .pill-row {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 3rem;
+  }
+  .pill {
+    background: rgba(90,50,200,0.2);
+    border: 1px solid rgba(120,80,240,0.4);
+    color: #9070e0;
+    font-size: 0.75rem;
+    padding: 0.4rem 1rem;
+    border-radius: 999px;
+    letter-spacing: 0.05em;
+  }
+  .countdown-strip {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 2.5rem;
+  }
+  .cd-unit {
+    text-align: center;
+  }
+  .cd-num {
+    display: block;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #9060f0;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    background: rgba(90,50,200,0.15);
+    border: 1px solid rgba(120,80,240,0.3);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    min-width: 70px;
+  }
+  .cd-lbl {
+    display: block;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #4030a0;
+    margin-top: 0.4rem;
+  }
+  .footer { font-size: 0.68rem; color: #2a1a60; letter-spacing: 0.15em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="ring-wrap">
+    <div class="ring-outer"></div>
+    <div class="ring-middle"></div>
+    <div class="ring-center">&#x2726;</div>
+  </div>
+  <p class="brand">Indigo Labs</p>
+  <div class="brand-lg">Indigo Labs</div>
+  <h1>The Wait Is<br><span class="accent">Almost Over</span></h1>
+  <p class="sub">
+    We've been heads-down building something that will change how teams
+    collaborate, create, and ship. The countdown has begun.
+  </p>
+  <div class="countdown-strip">
+    <div class="cd-unit"><span class="cd-num" id="d25">00</span><span class="cd-lbl">Days</span></div>
+    <div class="cd-unit"><span class="cd-num" id="h25">00</span><span class="cd-lbl">Hours</span></div>
+    <div class="cd-unit"><span class="cd-num" id="m25">00</span><span class="cd-lbl">Minutes</span></div>
+    <div class="cd-unit"><span class="cd-num" id="s25">00</span><span class="cd-lbl">Seconds</span></div>
+  </div>
+  <div class="pill-row">
+    <span class="pill">AI-Powered</span>
+    <span class="pill">Real-Time</span>
+    <span class="pill">Team Collaboration</span>
+    <span class="pill">Enterprise Ready</span>
+  </div>
+  <p class="footer">Indigo Labs &copy; 2025 &nbsp;&mdash;&nbsp; Private beta coming soon</p>
+  <script>
+    var t = new Date(); t.setDate(t.getDate() + 23);
+    function tick() {
+      var diff = t - new Date();
+      if (diff < 0) return;
+      document.getElementById('d25').textContent = String(Math.floor(diff/86400000)).padStart(2,'0');
+      document.getElementById('h25').textContent = String(Math.floor(diff%86400000/3600000)).padStart(2,'0');
+      document.getElementById('m25').textContent = String(Math.floor(diff%3600000/60000)).padStart(2,'0');
+      document.getElementById('s25').textContent = String(Math.floor(diff%60000/1000)).padStart(2,'0');
+    }
+    tick(); setInterval(tick, 1000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printing New Pages — The Inkwell Studio</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #d4c4a0;
+    color: #2a1a0a;
+    font-family: 'Times New Roman', Georgia, serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(ellipse at 0% 0%, rgba(90,60,20,0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 100% 100%, rgba(60,40,10,0.2) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  /* Paper texture effect with CSS */
+  .paper {
+    background: #f2e8d0;
+    max-width: 640px;
+    width: 100%;
+    padding: 3.5rem 3.5rem;
+    position: relative;
+    z-index: 2;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.1),
+      0 8px 20px rgba(0,0,0,0.15),
+      inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .paper::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 50px;
+    width: 2px;
+    height: 100%;
+    background: rgba(200,100,80,0.3);
+  }
+  .ink-header {
+    border-bottom: 3px double #2a1a0a;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .studio-name {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-style: italic;
+    color: #1a0a00;
+    letter-spacing: 0.02em;
+  }
+  .issue-info {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: #6a4a2a;
+    text-align: right;
+    font-family: Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .big-headline {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+    color: #1a0a00;
+    border-bottom: 2px solid #2a1a0a;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .sub-headline {
+    text-align: center;
+    font-style: italic;
+    color: #4a2a0a;
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    border-top: 1px solid #8a6a3a;
+    padding-top: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .col-text {
+    font-size: 0.88rem;
+    line-height: 1.75;
+    color: #2a1a0a;
+    text-align: justify;
+    hyphens: auto;
+  }
+  .col-text p { margin-bottom: 0.6rem; }
+  .drop-cap::first-letter {
+    float: left;
+    font-size: 3.5em;
+    line-height: 0.75;
+    margin-right: 0.1em;
+    font-weight: 900;
+    color: #1a0a00;
+    padding-top: 0.05em;
+  }
+  .pull-box {
+    border: 1px solid #8a6a3a;
+    border-left: 4px solid #2a1a0a;
+    padding: 0.75rem 1rem;
+    font-style: italic;
+    font-size: 0.95rem;
+    color: #3a1a00;
+    margin-top: 0.75rem;
+    background: rgba(42,26,10,0.04);
+  }
+  .footer-rule {
+    border-top: 1px solid #8a6a3a;
+    border-bottom: 1px solid #8a6a3a;
+    padding: 0.4rem 0;
+    text-align: center;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #6a4a2a;
+    font-family: Arial, sans-serif;
+  }
+  @media (max-width: 520px) {
+    .paper { padding: 2rem 1.5rem; }
+    .columns { grid-template-columns: 1fr; }
+    .paper::before { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="paper">
+  <div class="ink-header">
+    <div class="studio-name">The Inkwell Studio</div>
+    <div class="issue-info">Creative Agency<br>Est. 2011</div>
+  </div>
+  <div class="big-headline">Printing New Pages</div>
+  <div class="sub-headline">We are composing something entirely new. Stand by for the next edition.</div>
+  <div class="columns">
+    <div class="col-text drop-cap">
+      <p>The presses are running. Every element of our new website is being set by hand — metaphorically speaking — with the same care and craft we bring to every client project.</p>
+      <p>We believe in taking the time to do things properly. Our old site served us well, but the story has moved on, and so must the page.</p>
+    </div>
+    <div class="col-text">
+      <p>Good design, like good writing, rewards patience. We are not rushing this. Every layout, every typographic choice, every piece of copy is being considered and reconsidered.</p>
+      <div class="pull-box">"A blank page is not an absence of ideas — it's an invitation."</div>
+    </div>
+  </div>
+  <div class="footer-rule">New site coming soon &nbsp;&#x2022;&nbsp; Thank you for reading &nbsp;&#x2022;&nbsp; The Inkwell Studio</div>
+</div>
+</body>
+</html>

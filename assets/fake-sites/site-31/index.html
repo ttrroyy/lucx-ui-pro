@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunrise Media Group — A New Day Is Coming</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(160deg, #1a0533 0%, #6b2d6b 25%, #c0544a 55%, #f4a261 78%, #fce7a0 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #fff;
+  }
+  .horizon-layer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 30vh;
+    background: linear-gradient(to top, rgba(0,0,0,0.4), transparent);
+    pointer-events: none;
+  }
+  .sun {
+    position: fixed;
+    bottom: 22vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 60px;
+    border-radius: 60px 60px 0 0;
+    background: radial-gradient(circle at 50% 100%, #ffe082, #ff9800 40%, #ff5722 70%, transparent);
+    box-shadow: 0 0 60px 20px rgba(255,152,0,0.4);
+  }
+  .rays {
+    position: fixed;
+    bottom: 22vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+  }
+  .ray {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    height: 80px;
+    background: linear-gradient(to top, rgba(255,224,130,0.6), transparent);
+    transform-origin: bottom center;
+    margin-left: -1px;
+  }
+  .container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 3rem 2rem;
+    max-width: 640px;
+  }
+  .eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    font-size: clamp(2.2rem, 6vw, 3.8rem);
+    font-weight: 300;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+    text-shadow: 0 2px 20px rgba(0,0,0,0.4);
+  }
+  h1 strong {
+    font-weight: 700;
+    display: block;
+    font-size: 1.1em;
+  }
+  .brand-name {
+    font-size: 0.8rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+    margin-top: 0.5rem;
+  }
+  .divider {
+    width: 80px;
+    height: 1px;
+    background: rgba(255,255,255,0.4);
+    margin: 2rem auto;
+  }
+  p {
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 1rem;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.3);
+  }
+  .pills {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+  .pill {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    backdrop-filter: blur(4px);
+    padding: 0.5rem 1.25rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    color: rgba(255,255,255,0.9);
+  }
+</style>
+</head>
+<body>
+<div class="horizon-layer"></div>
+<div class="sun"></div>
+<div class="rays">
+  <div class="ray" style="transform:rotate(-60deg)"></div>
+  <div class="ray" style="transform:rotate(-40deg)"></div>
+  <div class="ray" style="transform:rotate(-20deg)"></div>
+  <div class="ray" style="transform:rotate(0deg)"></div>
+  <div class="ray" style="transform:rotate(20deg)"></div>
+  <div class="ray" style="transform:rotate(40deg)"></div>
+  <div class="ray" style="transform:rotate(60deg)"></div>
+</div>
+<div class="container">
+  <div class="eyebrow">Sunrise Media Group</div>
+  <h1>A New Day<br><strong>Is Coming</strong></h1>
+  <div class="brand-name">Illuminating Stories Since 2009</div>
+  <div class="divider"></div>
+  <p>We're rebuilding our digital home from the ground up to bring you a brighter, clearer, and more inspiring media experience.</p>
+  <p>Our journalists and creators are hard at work. The sun is almost up.</p>
+  <div class="pills">
+    <div class="pill">Breaking News</div>
+    <div class="pill">Long-form Journalism</div>
+    <div class="pill">Documentaries</div>
+    <div class="pill">Podcasts</div>
+  </div>
+</div>
+</body>
+</html>

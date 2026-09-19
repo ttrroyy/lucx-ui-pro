@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudPath Consulting — Soaring to New Heights</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #e8f4fd;
+    font-family: 'Century Gothic', 'Trebuchet MS', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  /* CSS cloud shapes */
+  .cloud {
+    position: absolute;
+    background: rgba(255,255,255,0.85);
+    border-radius: 50px;
+    pointer-events: none;
+  }
+  .cloud::before, .cloud::after {
+    content: '';
+    position: absolute;
+    background: rgba(255,255,255,0.85);
+    border-radius: 50%;
+  }
+  .c1 { width:180px; height:50px; top:8%; left:5%; opacity:0.9; }
+  .c1::before { width:80px; height:80px; top:-40px; left:20px; }
+  .c1::after  { width:60px; height:60px; top:-30px; left:80px; }
+  .c2 { width:140px; height:40px; top:18%; right:10%; opacity:0.7; }
+  .c2::before { width:60px; height:60px; top:-30px; left:15px; }
+  .c2::after  { width:50px; height:50px; top:-25px; left:65px; }
+  .c3 { width:100px; height:30px; bottom:25%; left:12%; opacity:0.6; }
+  .c3::before { width:45px; height:45px; top:-22px; left:10px; }
+  .c3::after  { width:35px; height:35px; top:-18px; left:45px; }
+  .c4 { width:160px; height:45px; bottom:15%; right:8%; opacity:0.75; }
+  .c4::before { width:70px; height:70px; top:-35px; left:18px; }
+  .c4::after  { width:55px; height:55px; top:-28px; left:75px; }
+
+  .content { position: relative; z-index: 1; }
+  .sky-icon { font-size: 3rem; margin-bottom: 1rem; }
+  .brand {
+    font-size: 0.75rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #4a90d9;
+    margin-bottom: 0.5rem;
+  }
+  .brand-full {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #1a5fa8;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    color: #0d3a6e;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    line-height: 1.2;
+  }
+  p {
+    font-size: 1rem;
+    color: #5580a8;
+    max-width: 400px;
+    line-height: 1.8;
+    margin-bottom: 2.5rem;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+  }
+  .chip {
+    background: rgba(74, 144, 217, 0.15);
+    border: 1px solid rgba(74,144,217,0.4);
+    color: #2471b8;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    letter-spacing: 0.05em;
+  }
+  .footer { font-size: 0.72rem; color: #9ab8d8; }
+</style>
+</head>
+<body>
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="cloud c3"></div>
+  <div class="cloud c4"></div>
+  <div class="content">
+    <div class="sky-icon">&#9992;&#65039;</div>
+    <p class="brand">CloudPath Consulting</p>
+    <div class="brand-full">CloudPath</div>
+    <h1>Soaring to<br>New Heights</h1>
+    <p>
+      Our new platform is taking flight. We're redesigning the way
+      businesses navigate cloud infrastructure — clearer skies ahead.
+    </p>
+    <div class="chips">
+      <span class="chip">Cloud Strategy</span>
+      <span class="chip">Migration</span>
+      <span class="chip">Architecture</span>
+      <span class="chip">Security</span>
+    </div>
+    <p class="footer">CloudPath Consulting &copy; 2025 &nbsp;&mdash;&nbsp; New site launching soon</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riding New Waves — Tidebreak Surf</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a2a3a;
+    color: #e0f4f8;
+    font-family: 'Trebuchet MS', 'Segoe UI', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  /* Ocean gradient */
+  .ocean-bg {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      #061822 0%,
+      #0a3050 30%,
+      #0d4868 60%,
+      #0f5a7a 100%
+    );
+  }
+  /* Wave animation */
+  .waves-wrap {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 200px;
+    overflow: hidden;
+  }
+  .wave {
+    position: absolute;
+    bottom: 0;
+    left: -100%;
+    width: 300%;
+    height: 100px;
+    border-radius: 50% 50% 0 0;
+  }
+  .wave1 {
+    background: rgba(15,90,120,0.6);
+    animation: wave-move 8s ease-in-out infinite;
+    bottom: 0;
+  }
+  .wave2 {
+    background: rgba(20,110,145,0.5);
+    animation: wave-move 11s ease-in-out infinite reverse;
+    bottom: 20px;
+    height: 80px;
+  }
+  .wave3 {
+    background: rgba(30,140,175,0.4);
+    animation: wave-move 14s ease-in-out infinite;
+    bottom: 35px;
+    height: 60px;
+  }
+  .seafoam {
+    position: absolute;
+    bottom: 95px; left: 0; right: 0;
+    height: 20px;
+    background: linear-gradient(to top, rgba(200,240,255,0.15), transparent);
+    animation: foam 8s ease-in-out infinite;
+  }
+  @keyframes wave-move {
+    0%, 100% { transform: translateX(0) scaleY(1); }
+    50% { transform: translateX(8%) scaleY(1.1); }
+  }
+  @keyframes foam {
+    0%, 100% { opacity: 0.5; transform: translateX(0); }
+    50% { opacity: 1; transform: translateX(4%); }
+  }
+  /* Light shimmer on water */
+  .shimmer {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 50%;
+    background: radial-gradient(ellipse at 50% 0%, rgba(20,140,200,0.15) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 3rem 2rem;
+    max-width: 620px;
+    margin-bottom: 100px;
+  }
+  .brand-area {
+    margin-bottom: 2rem;
+  }
+  .brand-name {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #6dd4f0;
+    margin-bottom: 0.2rem;
+  }
+  .brand-sub {
+    font-size: 0.65rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: rgba(109,212,240,0.5);
+  }
+  h1 {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 900;
+    text-transform: uppercase;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: #e0f8ff;
+    text-shadow: 0 4px 20px rgba(0,150,200,0.4);
+    margin-bottom: 0.25rem;
+  }
+  h1 .wave-word {
+    color: #4ac8e8;
+    text-shadow: 0 0 30px rgba(74,200,232,0.5), 0 4px 20px rgba(0,150,200,0.4);
+  }
+  .wave-dash {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    justify-content: center;
+    margin: 1.25rem 0;
+  }
+  .wd-line { flex: 1; max-width: 80px; height: 1px; background: rgba(74,200,232,0.4); }
+  .wd-sym { color: rgba(74,200,232,0.6); font-size: 1.2rem; }
+  p {
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: rgba(200,240,255,0.75);
+    margin-bottom: 0.75rem;
+  }
+  .condition-bar {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+  }
+  .cond {
+    text-align: center;
+  }
+  .cond-icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
+  .cond-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(109,212,240,0.6);
+  }
+  .cond-val {
+    font-size: 0.85rem;
+    color: #9ae8ff;
+    font-weight: 700;
+    margin-top: 0.1rem;
+  }
+</style>
+</head>
+<body>
+<div class="ocean-bg"></div>
+<div class="shimmer"></div>
+<div class="waves-wrap">
+  <div class="wave wave1"></div>
+  <div class="wave wave2"></div>
+  <div class="wave wave3"></div>
+  <div class="seafoam"></div>
+</div>
+<div class="container">
+  <div class="brand-area">
+    <div class="brand-name">&#x1F30A; Tidebreak Surf</div>
+    <div class="brand-sub">Boards &bull; Gear &bull; Culture</div>
+  </div>
+  <h1>Riding<br><span class="wave-word">New Waves</span></h1>
+  <div class="wave-dash">
+    <span class="wd-line"></span>
+    <span class="wd-sym">&#x223C;</span>
+    <span class="wd-line"></span>
+  </div>
+  <p>We're paddling out to a whole new site. New boards, new gear, new vibes — and a much better online shop for everything you need in the water and out of it.</p>
+  <p>The swell is building. We'll see you out there soon.</p>
+  <div class="condition-bar">
+    <div class="cond">
+      <div class="cond-icon">&#x1F4CF;</div>
+      <div class="cond-val">4-6 ft</div>
+      <div class="cond-label">New Features</div>
+    </div>
+    <div class="cond">
+      <div class="cond-icon">&#x1F32C;</div>
+      <div class="cond-val">Offshore</div>
+      <div class="cond-label">Design Direction</div>
+    </div>
+    <div class="cond">
+      <div class="cond-icon">&#x1F4C5;</div>
+      <div class="cond-val">Soon</div>
+      <div class="cond-label">Launch Window</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

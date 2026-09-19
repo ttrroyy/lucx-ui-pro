@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Petal Boutique — We're Getting Ready</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f0ecff;
+    font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+  .circle-logo {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #c4b5fd, #a78bfa);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    margin: 0 auto 1.5rem;
+    box-shadow: 0 8px 32px rgba(167,139,250,0.35);
+  }
+  .brand-name {
+    font-size: 0.7rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #9b7fe8;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    color: #3b1e8e;
+    font-weight: 400;
+    font-style: italic;
+    margin-bottom: 1rem;
+  }
+  .sub {
+    font-size: 0.95rem;
+    color: #7c6aad;
+    max-width: 360px;
+    line-height: 1.9;
+    margin-bottom: 2.5rem;
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 2.5rem;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+    color: #7c6aad;
+  }
+  .step-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #c4b5fd;
+    flex-shrink: 0;
+  }
+  .step.done .step-dot { background: #7c3aed; }
+  .step.done { color: #3b1e8e; }
+  .footer {
+    font-size: 0.72rem;
+    color: #b5a8d8;
+    letter-spacing: 0.12em;
+  }
+</style>
+</head>
+<body>
+  <div class="circle-logo">&#127826;</div>
+  <p class="brand-name">Petal Boutique</p>
+  <h1>We're Getting Ready</h1>
+  <p class="sub">
+    Our new collection and boutique experience are being carefully prepared.
+    Something lovely is on its way to you soon.
+  </p>
+  <div class="steps">
+    <div class="step done"><div class="step-dot"></div>Curation &amp; sourcing complete</div>
+    <div class="step done"><div class="step-dot"></div>Photography complete</div>
+    <div class="step"><div class="step-dot"></div>Website build in progress</div>
+    <div class="step"><div class="step-dot"></div>Online store going live soon</div>
+  </div>
+  <p class="footer">Petal Boutique &nbsp;&mdash;&nbsp; Curated with love, 2025</p>
+</body>
+</html>

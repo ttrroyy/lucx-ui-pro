@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orbit Space Academy — Exploring New Frontiers</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #05080f;
+    color: #c8d8f8;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    overflow: hidden;
+  }
+  /* Stars */
+  .stars {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .star {
+    position: absolute;
+    background: #ffffff;
+    border-radius: 50%;
+    animation: twinkle var(--d, 3s) ease-in-out infinite;
+  }
+  @keyframes twinkle { 0%,100%{opacity:0.2} 50%{opacity:1} }
+
+  .content { position: relative; z-index: 1; }
+  .orbit-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #5070c0;
+    margin-bottom: 0.5rem;
+  }
+  .brand-large {
+    font-size: 1.2rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #8098e0;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.1;
+    margin-bottom: 1rem;
+    letter-spacing: -0.5px;
+  }
+  h1 .glow {
+    color: #7090ff;
+    text-shadow: 0 0 30px rgba(100,140,255,0.6);
+  }
+  .sub {
+    font-size: 1rem;
+    color: #5878a8;
+    max-width: 400px;
+    line-height: 1.8;
+    margin: 1rem auto 3rem;
+  }
+  .ring {
+    width: 100px; height: 100px;
+    border: 2px solid rgba(100,140,255,0.3);
+    border-radius: 50%;
+    margin: 0 auto 2rem;
+    position: relative;
+    animation: spin 12s linear infinite;
+  }
+  .ring::before {
+    content: '';
+    position: absolute;
+    top: -4px; left: 50%;
+    transform: translateX(-50%);
+    width: 8px; height: 8px;
+    background: #7090ff;
+    border-radius: 50%;
+    box-shadow: 0 0 12px #7090ff;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer {
+    font-size: 0.68rem;
+    color: #202840;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+  <div class="stars" id="stars"></div>
+  <div class="content">
+    <div class="orbit-icon">&#127760;</div>
+    <p class="brand">Orbit Space Academy</p>
+    <div class="brand-large">Orbit Academy</div>
+    <h1>Exploring<br><span class="glow">New Frontiers</span></h1>
+    <p class="sub">
+      We're launching a new era of space education. Our platform is being
+      assembled in orbit — mission launch is imminent.
+    </p>
+    <div class="ring"></div>
+    <p class="footer">Orbit Space Academy &copy; 2025 &nbsp;&mdash;&nbsp; T-minus: soon</p>
+  </div>
+  <script>
+    var s = document.getElementById('stars');
+    for (var i = 0; i < 120; i++) {
+      var el = document.createElement('div');
+      el.className = 'star';
+      var sz = Math.random() * 2 + 0.5;
+      el.style.cssText = 'width:'+sz+'px;height:'+sz+'px;top:'+Math.random()*100+'%;left:'+Math.random()*100+'%;--d:'+(2+Math.random()*4)+'s;animation-delay:'+(Math.random()*4)+'s';
+      s.appendChild(el);
+    }
+  </script>
+</body>
+</html>

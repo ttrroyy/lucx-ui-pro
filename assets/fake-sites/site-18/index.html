@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mira Fashion — New Collection Dropping Soon</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f8f0f2;
+    font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  @media (max-width: 650px) {
+    body { grid-template-columns: 1fr; }
+    .panel-right { display: none; }
+  }
+  .panel-left {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4rem 3.5rem;
+    background: #f8f0f2;
+  }
+  .eyebrow {
+    font-size: 0.65rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #b0758a;
+    margin-bottom: 0.75rem;
+  }
+  .brand-name {
+    font-size: 2.5rem;
+    font-weight: 400;
+    color: #2c0a14;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 3vw, 2.4rem);
+    color: #2c0a14;
+    font-weight: 400;
+    font-style: italic;
+    line-height: 1.35;
+    margin-bottom: 1.5rem;
+  }
+  p {
+    font-size: 0.95rem;
+    color: #8a6070;
+    line-height: 1.9;
+    max-width: 340px;
+    margin-bottom: 2.5rem;
+  }
+  .season-tag {
+    display: inline-block;
+    border: 1px solid #c8a0b0;
+    color: #9a6878;
+    font-size: 0.68rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    padding: 0.45rem 1.2rem;
+  }
+  .panel-right {
+    background: linear-gradient(160deg, #c47090 0%, #a04060 60%, #7a2840 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel-right::before {
+    content: '';
+    position: absolute;
+    top: 10%; right: -20%;
+    width: 200px; height: 200px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+  }
+  .panel-right::after {
+    content: '';
+    position: absolute;
+    bottom: 15%; left: -10%;
+    width: 150px; height: 150px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+  }
+  .panel-inner {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    color: rgba(255,255,255,0.85);
+  }
+  .panel-inner .big { font-size: 5rem; line-height: 1; margin-bottom: 0.5rem; }
+  .panel-inner .small { font-size: 0.65rem; letter-spacing: 0.35em; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+</style>
+</head>
+<body>
+  <div class="panel-left">
+    <p class="eyebrow">Mira Fashion</p>
+    <div class="brand-name">Mira</div>
+    <h1>New Collection<br>Dropping Soon</h1>
+    <p>
+      Something extraordinary is being crafted for the new season.
+      Our upcoming collection redefines elegance with a modern touch.
+    </p>
+    <span class="season-tag">Autumn / Winter 2025</span>
+  </div>
+  <div class="panel-right">
+    <div class="panel-inner">
+      <div class="big">&#10024;</div>
+      <div class="small">Collection reveal<br>coming soon</div>
+    </div>
+  </div>
+</body>
+</html>

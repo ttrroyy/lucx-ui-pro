@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crafting Something Special — Birch & Thread</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f8f2e8;
+    color: #3a2a1a;
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  /* Hand-drawn border using dashed CSS */
+  .frame-outer {
+    max-width: 580px;
+    width: 100%;
+    border: 3px dashed #c4a878;
+    padding: 8px;
+    background: #fdf8f0;
+  }
+  .frame-inner {
+    border: 1px solid #d4b888;
+    padding: 3rem 2.5rem;
+    text-align: center;
+    position: relative;
+    background: #fefcf8;
+  }
+  /* Corner doodles with CSS */
+  .corner-mark {
+    position: absolute;
+    width: 20px; height: 20px;
+    border: 2px solid #c4a878;
+  }
+  .corner-mark.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+  .corner-mark.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
+  .corner-mark.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; }
+  .corner-mark.br { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+  .stitch-top {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 1.5rem;
+  }
+  .stitch-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #c4a878;
+    opacity: 0.6;
+  }
+  .brand {
+    font-size: 1.4rem;
+    font-style: italic;
+    color: #5a3a2a;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.03em;
+  }
+  .brand-tag {
+    font-size: 0.68rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #a08060;
+    margin-bottom: 2rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  /* Wobbly hand-drawn style underline with CSS */
+  .wobbly {
+    width: 100%;
+    height: 8px;
+    background:
+      radial-gradient(ellipse 8px 4px at 50% 50%, transparent 3px, #c4a878 3px, #c4a878 4px, transparent 4px) repeat-x;
+    background-size: 16px 8px;
+    opacity: 0.5;
+    margin: 1rem 0;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: normal;
+    font-style: italic;
+    color: #2a1a0a;
+    line-height: 1.3;
+    margin-bottom: 0.5rem;
+  }
+  .asterisk-row {
+    color: #c4a878;
+    letter-spacing: 0.5em;
+    font-size: 1rem;
+    margin: 0.75rem 0;
+  }
+  p {
+    font-size: 0.9rem;
+    line-height: 1.9;
+    color: #6a5040;
+    margin-bottom: 0.75rem;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+  }
+  .tag-item {
+    border: 1px dashed #c4a878;
+    padding: 0.35rem 0.85rem;
+    font-size: 0.72rem;
+    color: #8a6848;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    letter-spacing: 0.1em;
+    background: rgba(196,168,120,0.06);
+  }
+  .stitch-bottom {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 1.5rem;
+  }
+  .note-below {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #b09878;
+    letter-spacing: 0.15em;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    text-transform: uppercase;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="frame-outer">
+  <div class="frame-inner">
+    <div class="corner-mark tl"></div>
+    <div class="corner-mark tr"></div>
+    <div class="corner-mark bl"></div>
+    <div class="corner-mark br"></div>
+    <div class="stitch-top">
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+    </div>
+    <div class="brand">Birch &amp; Thread</div>
+    <div class="brand-tag">Handmade Goods &amp; Craft Supplies</div>
+    <div class="wobbly"></div>
+    <h1>Crafting Something<br>Special</h1>
+    <div class="asterisk-row">&#x2732; &#x2732; &#x2732;</div>
+    <p>We're putting the same love and attention into our new website that we put into everything we make. Hand-selected, carefully composed, and made to last.</p>
+    <p>Our shop will be back up soon with new products, new stories, and a much nicer place to browse.</p>
+    <div class="tag-list">
+      <div class="tag-item">Handmade</div>
+      <div class="tag-item">Natural Materials</div>
+      <div class="tag-item">Small Batch</div>
+      <div class="tag-item">Made with Care</div>
+    </div>
+    <div class="stitch-bottom">
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+      <div class="stitch-dot"></div><div class="stitch-dot"></div><div class="stitch-dot"></div>
+    </div>
+  </div>
+</div>
+<div class="note-below">Back soon &nbsp;&#x2022;&nbsp; Worth the wait</div>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arctic Digital — New Website Launching Soon</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #edf6ff;
+    font-family: 'Segoe UI', 'Century Gothic', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    background-image:
+      linear-gradient(160deg, #ffffff 0%, #e0f2ff 50%, #cce8ff 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  /* Ice crystal shapes */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -100px; right: -100px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(200,235,255,0.8) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -60px; left: -60px;
+    width: 280px; height: 280px;
+    background: radial-gradient(circle, rgba(180,225,255,0.7) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .crystal { font-size: 3rem; margin-bottom: 0.5rem; }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #4a8ab0;
+    margin-bottom: 0.25rem;
+  }
+  .brand-lg {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #1a5080;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 5vw, 3.2rem);
+    color: #0d3a5c;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 1rem;
+    line-height: 1.2;
+  }
+  .tagline {
+    font-size: 0.85rem;
+    color: #5090b8;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 2rem;
+  }
+  p {
+    font-size: 0.97rem;
+    color: #5080a0;
+    max-width: 400px;
+    line-height: 1.85;
+    margin-bottom: 2.5rem;
+  }
+  .ice-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    max-width: 380px;
+    width: 100%;
+    margin-bottom: 2.5rem;
+  }
+  .ice-cell {
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(130,190,230,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+    backdrop-filter: blur(4px);
+  }
+  .ice-cell .label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #6898b8;
+    margin-bottom: 0.3rem;
+  }
+  .ice-cell .value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1a5080;
+  }
+  .footer {
+    font-size: 0.7rem;
+    color: #90bcd8;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+  <div class="crystal">&#10052;</div>
+  <p class="brand">Arctic Digital</p>
+  <div class="brand-lg">Arctic Digital</div>
+  <h1>New Website<br>Launching Soon</h1>
+  <p class="tagline">Clear, Fast &amp; Precise</p>
+  <p>
+    We're crafting a crisp new digital experience that reflects our
+    commitment to clarity and precision in everything we do.
+  </p>
+  <div class="ice-grid">
+    <div class="ice-cell"><div class="label">Status</div><div class="value">Building</div></div>
+    <div class="ice-cell"><div class="label">ETA</div><div class="value">Q3 2025</div></div>
+    <div class="ice-cell"><div class="label">Design</div><div class="value">Complete</div></div>
+    <div class="ice-cell"><div class="label">Dev</div><div class="value">In Progress</div></div>
+  </div>
+  <p class="footer">Arctic Digital &copy; 2025 &nbsp;&mdash;&nbsp; Precision-crafted digital solutions</p>
+</body>
+</html>

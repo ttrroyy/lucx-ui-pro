@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ENTERING NEW DIMENSION — VORTEX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #08000f;
+    color: #e0d0ff;
+    font-family: 'Arial Black', 'Arial', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  /* Grid background */
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(120,0,255,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,0,255,0.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+    perspective: 300px;
+    transform: rotateX(60deg) scaleY(2);
+    transform-origin: bottom center;
+    bottom: -50%;
+    pointer-events: none;
+  }
+  .grid-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, #08000f 0%, transparent 40%, transparent 60%, #08000f 100%);
+  }
+  /* Glow orbs */
+  .orb {
+    position: fixed;
+    border-radius: 50%;
+    pointer-events: none;
+    filter: blur(60px);
+  }
+  .orb1 { width: 400px; height: 400px; background: rgba(120,0,255,0.3); top: -100px; left: -100px; }
+  .orb2 { width: 300px; height: 300px; background: rgba(200,0,255,0.2); bottom: -50px; right: -50px; }
+  .orb3 { width: 200px; height: 200px; background: rgba(80,0,200,0.4); top: 50%; left: 50%; transform: translate(-50%,-50%); }
+  .container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 2rem;
+    max-width: 700px;
+  }
+  .v-logo {
+    font-size: 0.65rem;
+    letter-spacing: 0.6em;
+    text-transform: uppercase;
+    color: rgba(160,80,255,0.6);
+    margin-bottom: 2rem;
+  }
+  .title-wrap {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(2.5rem, 8vw, 6rem);
+    font-weight: 900;
+    text-transform: uppercase;
+    line-height: 0.9;
+    letter-spacing: 0.05em;
+    color: transparent;
+    -webkit-text-stroke: 2px rgba(160,80,255,0.8);
+    position: relative;
+  }
+  h1 .fill {
+    color: #c060ff;
+    -webkit-text-stroke: 0;
+    text-shadow:
+      0 0 20px rgba(160,80,255,0.8),
+      0 0 60px rgba(120,0,255,0.5),
+      0 0 120px rgba(120,0,255,0.3);
+  }
+  .h1-sub {
+    font-size: clamp(1.5rem, 4vw, 3rem);
+    color: rgba(200,120,255,0.9);
+    text-shadow: 0 0 30px rgba(160,80,255,0.6);
+    margin-bottom: 0.5rem;
+  }
+  .scan-line {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #c060ff, transparent);
+    margin: 2rem auto;
+    max-width: 400px;
+    box-shadow: 0 0 15px rgba(192,96,255,0.6);
+  }
+  p {
+    font-size: 0.9rem;
+    line-height: 1.8;
+    color: rgba(180,140,255,0.7);
+    max-width: 460px;
+    margin: 0 auto 1rem;
+    letter-spacing: 0.05em;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  .hex-grid {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+  .hex {
+    border: 1px solid rgba(160,80,255,0.4);
+    padding: 0.5rem 1rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(160,80,255,0.8);
+    clip-path: polygon(8% 0%, 92% 0%, 100% 50%, 92% 100%, 8% 100%, 0% 50%);
+    background: rgba(120,0,255,0.08);
+  }
+  .pulse-ring {
+    position: fixed;
+    width: 600px; height: 600px;
+    border-radius: 50%;
+    border: 1px solid rgba(120,0,255,0.15);
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    animation: ringpulse 4s ease-out infinite;
+    pointer-events: none;
+  }
+  .pulse-ring:nth-child(2) { animation-delay: 1.3s; }
+  .pulse-ring:nth-child(3) { animation-delay: 2.6s; }
+  @keyframes ringpulse {
+    0% { transform: translate(-50%,-50%) scale(0.2); opacity: 0.8; }
+    100% { transform: translate(-50%,-50%) scale(1.5); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+<div class="pulse-ring"></div>
+<div class="pulse-ring"></div>
+<div class="pulse-ring"></div>
+<div class="container">
+  <div class="v-logo">&#x2726; VORTEX GAMING &amp; TECH &#x2726;</div>
+  <div class="h1-sub">ENTERING</div>
+  <h1><span class="fill">NEW</span><br>DIMENSION</h1>
+  <div class="scan-line"></div>
+  <p>Our universe is being rebuilt from the ground up. New mechanics, new visuals, new everything. What comes next will redefine the game.</p>
+  <p>Stand by for transmission.</p>
+  <div class="hex-grid">
+    <div class="hex">Engine v5</div>
+    <div class="hex">New Worlds</div>
+    <div class="hex">Full Rebuild</div>
+    <div class="hex">Q1 2025</div>
+  </div>
+</div>
+</body>
+</html>

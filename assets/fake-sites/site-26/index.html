@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Upgrade in Progress</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    color: #00ff41;
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,255,65,0.03) 2px,
+      rgba(0,255,65,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+  .scanline {
+    position: fixed;
+    top: -100%;
+    left: 0;
+    right: 0;
+    height: 30%;
+    background: linear-gradient(transparent, rgba(0,255,65,0.04), transparent);
+    animation: scan 8s linear infinite;
+    pointer-events: none;
+    z-index: 11;
+  }
+  @keyframes scan {
+    0% { top: -30%; }
+    100% { top: 110%; }
+  }
+  .container {
+    text-align: center;
+    z-index: 5;
+    padding: 2rem;
+    max-width: 700px;
+  }
+  .glitch-title {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-shadow:
+      0 0 10px #00ff41,
+      0 0 30px #00ff41,
+      0 0 60px #00ff41;
+    animation: flicker 4s infinite;
+    margin-bottom: 0.5rem;
+  }
+  @keyframes flicker {
+    0%, 95%, 100% { opacity: 1; }
+    96% { opacity: 0.4; }
+    97% { opacity: 1; }
+    98% { opacity: 0.2; }
+    99% { opacity: 0.9; }
+  }
+  .subtitle {
+    font-size: 1.1rem;
+    color: #00cc33;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-bottom: 3rem;
+  }
+  .terminal-box {
+    border: 1px solid #00ff41;
+    padding: 1.5rem 2rem;
+    text-align: left;
+    margin-bottom: 2rem;
+    box-shadow: 0 0 20px rgba(0,255,65,0.2), inset 0 0 20px rgba(0,255,65,0.05);
+  }
+  .terminal-line {
+    font-size: 0.85rem;
+    line-height: 2;
+    color: #00dd38;
+  }
+  .terminal-line .prompt { color: #00ff41; }
+  .terminal-line .ok { color: #00ff41; }
+  .terminal-line .warn { color: #ffdd00; }
+  .blink {
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+  .progress-wrap {
+    border: 1px solid #00ff41;
+    height: 20px;
+    width: 100%;
+    margin-top: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #003300, #00ff41);
+    width: 73%;
+    box-shadow: 0 0 15px #00ff41;
+    animation: pulse 2s ease-in-out infinite alternate;
+  }
+  @keyframes pulse {
+    from { box-shadow: 0 0 10px #00ff41; }
+    to { box-shadow: 0 0 30px #00ff41, 0 0 60px #00aa28; }
+  }
+  .progress-label {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.2em;
+    color: #009922;
+  }
+  .corner {
+    position: fixed;
+    font-size: 0.65rem;
+    color: #004411;
+    letter-spacing: 0.1em;
+  }
+  .corner.tl { top: 1rem; left: 1rem; }
+  .corner.tr { top: 1rem; right: 1rem; }
+  .corner.bl { bottom: 1rem; left: 1rem; }
+  .corner.br { bottom: 1rem; right: 1rem; }
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<span class="corner tl">SYS.VER 4.2.0</span>
+<span class="corner tr">NODE: ALPHA-7</span>
+<span class="corner bl">UPLINK: SECURE</span>
+<span class="corner br">&#x25CF; ONLINE</span>
+<div class="container">
+  <div class="glitch-title">SYSTEM UPGRADE</div>
+  <div class="subtitle">// in progress //</div>
+  <div class="terminal-box">
+    <div class="terminal-line"><span class="prompt">&gt; </span>Initializing core modules... <span class="ok">[OK]</span></div>
+    <div class="terminal-line"><span class="prompt">&gt; </span>Flushing legacy cache... <span class="ok">[OK]</span></div>
+    <div class="terminal-line"><span class="prompt">&gt; </span>Migrating database clusters... <span class="warn">[73%]</span></div>
+    <div class="terminal-line"><span class="prompt">&gt; </span>Deploying new architecture... <span class="warn">[PENDING]</span></div>
+    <div class="terminal-line"><span class="prompt">&gt; </span><span class="blink">&#x2588;</span></div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-bar"></div>
+  </div>
+  <div class="progress-label">UPGRADE SEQUENCE :: 73% COMPLETE :: EST. 6 HOURS REMAINING</div>
+</div>
+</body>
+</html>

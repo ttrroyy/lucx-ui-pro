@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scheduled Maintenance Window — Nexbridge IT</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f0f4fa;
+    color: #1a2b4a;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .topbar {
+    background: #1655a2;
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .topbar-logo {
+    color: #fff;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.05em;
+  }
+  .topbar-logo span { color: #7fb3f5; }
+  .topbar-tag {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+  }
+  .alert-banner {
+    background: #1655a2;
+    color: #fff;
+    padding: 0.75rem 2rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .alert-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #ffd166;
+    animation: blink 1.5s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 700;
+    color: #0d1f3c;
+    margin-bottom: 0.5rem;
+    text-align: center;
+  }
+  .sub {
+    font-size: 0.95rem;
+    color: #5878a4;
+    text-align: center;
+    margin-bottom: 3rem;
+    max-width: 500px;
+  }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.25rem;
+    width: 100%;
+    max-width: 780px;
+    margin-bottom: 2.5rem;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid #c8d8ee;
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    border-top: 3px solid #1655a2;
+  }
+  .card-icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .card-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #1655a2;
+    margin-bottom: 0.4rem;
+  }
+  .card-body {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #4a6080;
+  }
+  .timeline {
+    background: #fff;
+    border: 1px solid #c8d8ee;
+    border-radius: 6px;
+    padding: 1.5rem 2rem;
+    width: 100%;
+    max-width: 780px;
+    margin-bottom: 2rem;
+  }
+  .tl-title {
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #1655a2;
+    margin-bottom: 1rem;
+    font-weight: 700;
+  }
+  .tl-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #e8f0f8;
+    font-size: 0.85rem;
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-time { color: #1655a2; font-weight: 600; min-width: 60px; }
+  .tl-event { color: #3a5070; }
+  .tl-status { margin-left: auto; font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 3px; }
+  .done { background: #e0f2e9; color: #2d7a4f; }
+  .active { background: #fff3cd; color: #7a5c00; }
+  .pending { background: #f0f4fa; color: #8a9bba; }
+  .footer-note {
+    font-size: 0.78rem;
+    color: #8a9bba;
+    text-align: center;
+    max-width: 500px;
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-logo">Nexbridge<span>IT</span></div>
+  <div class="topbar-tag">Enterprise Technology Solutions</div>
+</div>
+<div class="main">
+  <div class="alert-banner">
+    <div class="alert-dot"></div>
+    <span>Scheduled Maintenance Window — Services Temporarily Unavailable</span>
+  </div>
+  <h1>Scheduled Maintenance Window</h1>
+  <div class="sub">We are performing planned infrastructure upgrades. All customer portals and web services will be restored upon completion.</div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#x1F6E1;</div>
+      <div class="card-title">Security Patches</div>
+      <div class="card-body">Critical OS and firmware updates being applied across all production nodes.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#x1F504;</div>
+      <div class="card-title">Load Balancer</div>
+      <div class="card-body">Reconfiguring routing rules and upgrading balancer firmware to latest stable release.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#x1F4BE;</div>
+      <div class="card-title">Backup Verification</div>
+      <div class="card-body">Full off-site backup integrity checks being conducted prior to upgrade completion.</div>
+    </div>
+  </div>
+  <div class="timeline">
+    <div class="tl-title">Maintenance Schedule</div>
+    <div class="tl-row"><span class="tl-time">00:00</span><span class="tl-event">Maintenance window begins — services redirected</span><span class="tl-status done">Done</span></div>
+    <div class="tl-row"><span class="tl-time">01:30</span><span class="tl-event">Security patches applied to all nodes</span><span class="tl-status active">In Progress</span></div>
+    <div class="tl-row"><span class="tl-time">03:00</span><span class="tl-event">Load balancer reconfiguration and testing</span><span class="tl-status pending">Pending</span></div>
+    <div class="tl-row"><span class="tl-time">05:00</span><span class="tl-event">Final verification and service restoration</span><span class="tl-status pending">Pending</span></div>
+  </div>
+  <div class="footer-note">Ticket ID: NX-MW-2024-0891 &nbsp;|&nbsp; If you have a critical incident, contact your account manager directly.</div>
+</div>
+</body>
+</html>

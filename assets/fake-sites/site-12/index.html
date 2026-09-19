@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RedLine Media — Website Redesign In Progress</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #111111;
+    color: #ffffff;
+    font-family: Impact, 'Arial Narrow', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .top-stripe {
+    height: 6px;
+    background: #e81c1c;
+  }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+  .logo {
+    font-size: 1.8rem;
+    letter-spacing: 0.15em;
+    color: #e81c1c;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+  }
+  .logo-sub {
+    font-size: 0.6rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #555;
+    font-family: Arial, sans-serif;
+    font-weight: 400;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(2.5rem, 8vw, 6rem);
+    line-height: 0.95;
+    text-transform: uppercase;
+    letter-spacing: -2px;
+    color: #ffffff;
+    margin-bottom: 0.5rem;
+  }
+  h1 .red { color: #e81c1c; }
+  .subtitle {
+    font-size: 1.1rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #777;
+    font-family: Arial, sans-serif;
+    font-weight: 400;
+    margin-bottom: 3rem;
+  }
+  .counter-row {
+    display: flex;
+    gap: 0;
+    border: 2px solid #e81c1c;
+    overflow: hidden;
+    margin-bottom: 3rem;
+  }
+  .counter-item {
+    padding: 1rem 1.5rem;
+    border-right: 2px solid #e81c1c;
+    text-align: center;
+  }
+  .counter-item:last-child { border-right: none; }
+  .counter-item .n { display: block; font-size: 1.8rem; color: #e81c1c; line-height: 1; }
+  .counter-item .l { display: block; font-size: 0.55rem; letter-spacing: 0.2em; color: #555; font-family: Arial, sans-serif; margin-top: 0.3rem; text-transform: uppercase; }
+  .bottom {
+    font-size: 0.65rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #333;
+    font-family: Arial, sans-serif;
+  }
+  .bottom-stripe {
+    height: 6px;
+    background: #e81c1c;
+  }
+</style>
+</head>
+<body>
+  <div class="top-stripe"></div>
+  <div class="main">
+    <div class="logo">RedLine Media</div>
+    <div class="logo-sub">Creative Agency &nbsp;&bull;&nbsp; Since 2018</div>
+    <h1>Website<br><span class="red">Redesign</span><br>In Progress</h1>
+    <p class="subtitle">We're rebuilding from the ground up</p>
+    <div class="counter-row">
+      <div class="counter-item"><span class="n">12</span><span class="l">Years</span></div>
+      <div class="counter-item"><span class="n">340+</span><span class="l">Projects</span></div>
+      <div class="counter-item"><span class="n">98%</span><span class="l">Satisfaction</span></div>
+    </div>
+    <p class="bottom">RedLine Media &copy; 2025 &nbsp;&mdash;&nbsp; New site dropping soon</p>
+  </div>
+  <div class="bottom-stripe"></div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Analytics — Next Generation Platform</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #03050f;
+    color: #c0e8ff;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    overflow: hidden;
+  }
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,180,255,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,180,255,0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+  /* Glowing orb */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -55%);
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(0,180,255,0.08) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .content { position: relative; z-index: 1; }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #0090c8;
+    margin-bottom: 1rem;
+  }
+  .logo-text {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #00c8ff;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 3rem;
+  }
+  .logo-text .dot { color: #ffffff; }
+  h1 {
+    font-size: clamp(2rem, 6vw, 4.5rem);
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.05;
+    margin-bottom: 0.5rem;
+    letter-spacing: -1px;
+  }
+  h1 .accent { color: #00c8ff; }
+  .sub {
+    font-size: 1rem;
+    color: #5090b0;
+    max-width: 420px;
+    line-height: 1.8;
+    margin: 1.5rem auto 3rem;
+  }
+  .metric-row {
+    display: flex;
+    gap: 2rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 3rem;
+  }
+  .metric {
+    text-align: center;
+  }
+  .metric .val {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #00c8ff;
+    display: block;
+    line-height: 1;
+  }
+  .metric .lbl {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #305868;
+    display: block;
+    margin-top: 0.3rem;
+  }
+  .cyber-btn {
+    display: inline-block;
+    border: 1px solid #00c8ff;
+    color: #00c8ff;
+    padding: 0.65rem 2rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    text-decoration: none;
+    position: relative;
+    margin-bottom: 2rem;
+  }
+  .cyber-btn::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,200,255,0.05);
+  }
+  .footer { font-size: 0.65rem; color: #1a3848; letter-spacing: 0.2em; }
+</style>
+</head>
+<body>
+  <div class="content">
+    <p class="brand">Pulse Analytics</p>
+    <div class="logo-text">PULSE<span class="dot">.</span>IO</div>
+    <h1>Next <span class="accent">Generation</span><br>Platform</h1>
+    <p class="sub">
+      We're engineering the future of real-time data analytics.
+      Faster insights. Smarter decisions. Launching very soon.
+    </p>
+    <div class="metric-row">
+      <div class="metric"><span class="val">10x</span><span class="lbl">Faster Processing</span></div>
+      <div class="metric"><span class="val">99.9%</span><span class="lbl">Uptime SLA</span></div>
+      <div class="metric"><span class="val">&lt;1ms</span><span class="lbl">Latency</span></div>
+    </div>
+    <span class="cyber-btn">Notify Me at Launch</span>
+    <br>
+    <p class="footer">Pulse Analytics &copy; 2025 &nbsp;&mdash;&nbsp; Private beta starting soon</p>
+  </div>
+</body>
+</html>

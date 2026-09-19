@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Future Is Loading — Aphelion</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020408;
+    color: #c8d8f0;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  /* Star field using CSS pseudo-elements and box-shadow */
+  .star-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .star-layer::before {
+    content: '';
+    position: absolute;
+    width: 2px; height: 2px;
+    background: transparent;
+    box-shadow:
+      120px 80px rgba(255,255,255,0.8),
+      340px 150px rgba(255,255,255,0.6),
+      560px 60px rgba(200,220,255,0.9),
+      780px 200px rgba(255,255,255,0.7),
+      1000px 90px rgba(255,255,255,0.5),
+      1200px 170px rgba(200,220,255,0.8),
+      1400px 40px rgba(255,255,255,0.6),
+      200px 300px rgba(255,255,255,0.7),
+      450px 380px rgba(180,200,255,0.9),
+      700px 280px rgba(255,255,255,0.5),
+      950px 350px rgba(255,255,255,0.8),
+      1150px 320px rgba(200,220,255,0.6),
+      1350px 260px rgba(255,255,255,0.7),
+      80px 480px rgba(255,255,255,0.5),
+      300px 520px rgba(180,200,255,0.8),
+      600px 450px rgba(255,255,255,0.9),
+      850px 500px rgba(255,255,255,0.6),
+      1100px 470px rgba(200,220,255,0.7),
+      1300px 410px rgba(255,255,255,0.5),
+      50px 650px rgba(255,255,255,0.8),
+      280px 700px rgba(180,200,255,0.6),
+      530px 620px rgba(255,255,255,0.7),
+      760px 680px rgba(255,255,255,0.5),
+      1020px 640px rgba(200,220,255,0.9),
+      1250px 590px rgba(255,255,255,0.6),
+      160px 820px rgba(255,255,255,0.7),
+      420px 780px rgba(180,200,255,0.8),
+      670px 850px rgba(255,255,255,0.5),
+      910px 800px rgba(255,255,255,0.6),
+      1180px 760px rgba(200,220,255,0.9),
+      370px 920px rgba(255,255,255,0.7),
+      640px 960px rgba(255,255,255,0.5),
+      890px 940px rgba(180,200,255,0.8);
+  }
+  .star-layer::after {
+    content: '';
+    position: absolute;
+    width: 1px; height: 1px;
+    background: transparent;
+    box-shadow:
+      190px 120px rgba(255,255,255,0.9),
+      410px 220px rgba(180,200,255,0.7),
+      630px 140px rgba(255,255,255,0.6),
+      860px 260px rgba(255,255,255,0.8),
+      1070px 130px rgba(200,220,255,0.5),
+      1280px 290px rgba(255,255,255,0.9),
+      240px 420px rgba(255,255,255,0.6),
+      500px 480px rgba(180,200,255,0.8),
+      750px 400px rgba(255,255,255,0.7),
+      980px 440px rgba(255,255,255,0.5),
+      1230px 380px rgba(200,220,255,0.9),
+      140px 580px rgba(255,255,255,0.8),
+      390px 560px rgba(180,200,255,0.6),
+      640px 610px rgba(255,255,255,0.7),
+      880px 570px rgba(255,255,255,0.5),
+      1120px 540px rgba(200,220,255,0.8),
+      70px 740px rgba(255,255,255,0.6),
+      320px 760px rgba(180,200,255,0.9),
+      570px 720px rgba(255,255,255,0.7),
+      820px 780px rgba(255,255,255,0.5),
+      1060px 720px rgba(200,220,255,0.6),
+      215px 880px rgba(255,255,255,0.8),
+      465px 840px rgba(180,200,255,0.7),
+      715px 900px rgba(255,255,255,0.5),
+      960px 860px rgba(255,255,255,0.9);
+  }
+  /* Nebula glow */
+  .nebula {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+  }
+  .neb1 { width: 500px; height: 300px; background: rgba(40,20,100,0.35); top: 10%; left: 15%; }
+  .neb2 { width: 400px; height: 250px; background: rgba(10,50,120,0.25); bottom: 15%; right: 10%; }
+  .container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 3rem 2rem;
+    max-width: 660px;
+  }
+  .eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.55em;
+    text-transform: uppercase;
+    color: rgba(100,150,255,0.6);
+    margin-bottom: 2rem;
+  }
+  .planet {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #3a6aaa, #0a1a3a 60%, #020810);
+    box-shadow:
+      0 0 30px rgba(50,100,200,0.3),
+      0 0 60px rgba(30,70,150,0.15),
+      inset -15px -15px 30px rgba(0,0,30,0.8);
+    margin: 0 auto 2rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 3.5rem);
+    font-weight: 300;
+    color: #d8e8ff;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+    text-shadow: 0 0 40px rgba(80,140,255,0.3);
+    letter-spacing: 0.05em;
+  }
+  h1 strong {
+    font-weight: 800;
+    color: #7aafff;
+    text-shadow: 0 0 40px rgba(100,160,255,0.5);
+  }
+  .coord {
+    font-size: 0.72rem;
+    letter-spacing: 0.25em;
+    color: rgba(80,140,255,0.4);
+    margin-bottom: 2rem;
+    font-family: 'Courier New', monospace;
+  }
+  p {
+    font-size: 0.92rem;
+    line-height: 1.8;
+    color: rgba(180,210,255,0.7);
+    max-width: 460px;
+    margin: 0 auto 0.75rem;
+  }
+  .data-row {
+    display: flex;
+    gap: 2rem;
+    justify-content: center;
+    margin-top: 2.5rem;
+    flex-wrap: wrap;
+  }
+  .data-item { text-align: center; }
+  .data-val {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #7aafff;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 0 15px rgba(100,160,255,0.4);
+  }
+  .data-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(80,140,255,0.4);
+    margin-top: 0.25rem;
+  }
+</style>
+</head>
+<body>
+<div class="star-layer"></div>
+<div class="nebula neb1"></div>
+<div class="nebula neb2"></div>
+<div class="container">
+  <div class="eyebrow">Aphelion &nbsp;&#x2022;&nbsp; Space &amp; Technology Platform</div>
+  <div class="planet"></div>
+  <h1>The Future<br>Is <strong>Loading</strong></h1>
+  <div class="coord">&#x25B2; 48.3&deg;N &nbsp;&#x2022;&nbsp; SECTOR 7 &nbsp;&#x2022;&nbsp; T-MINUS: SOON</div>
+  <p>We're in the final stages of launching our new platform. The infrastructure has been built for what comes next — faster, smarter, further reaching than anything we've shipped before.</p>
+  <p>The universe doesn't wait. Neither will we.</p>
+  <div class="data-row">
+    <div class="data-item">
+      <div class="data-val">98.6%</div>
+      <div class="data-label">Systems Ready</div>
+    </div>
+    <div class="data-item">
+      <div class="data-val">&lt; 48h</div>
+      <div class="data-label">To Launch</div>
+    </div>
+    <div class="data-item">
+      <div class="data-val">&#x221E;</div>
+      <div class="data-label">Potential</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

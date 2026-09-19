@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fieldwork Agency — Site Being Upgraded</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #2a2e1e;
+    color: #c8c8a8;
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    border-bottom: 1px solid #3a4028;
+    padding: 1.2rem 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header .name {
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #7a8a5a;
+  }
+  .header .year { color: #4a5a3a; font-size: 0.75rem; }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 2.5rem;
+    max-width: 640px;
+  }
+  .label {
+    font-size: 0.65rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #5a6a4a;
+    margin-bottom: 1rem;
+    border-left: 2px solid #7a8a5a;
+    padding-left: 0.75rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    color: #e8e8c8;
+    font-weight: 400;
+    line-height: 1.2;
+    margin-bottom: 2rem;
+    letter-spacing: -0.5px;
+  }
+  .body-text {
+    font-size: 0.87rem;
+    color: #8a9a6a;
+    line-height: 2;
+    max-width: 460px;
+    margin-bottom: 3rem;
+  }
+  .list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-bottom: 3rem;
+  }
+  .list li {
+    font-size: 0.78rem;
+    color: #6a7a5a;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .list li::before {
+    content: '//';
+    color: #4a5a3a;
+    font-size: 0.7rem;
+    flex-shrink: 0;
+  }
+  .list li.done { color: #9aaa7a; }
+  .list li.done::before { content: 'OK'; color: #7a8a5a; }
+  .footer-bar {
+    border-top: 1px solid #3a4028;
+    padding: 1rem 2.5rem;
+    font-size: 0.65rem;
+    color: #3a4a2a;
+    letter-spacing: 0.15em;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span class="name">Fieldwork Agency</span>
+    <span class="year">Est. 2019</span>
+  </div>
+  <div class="main">
+    <div class="label">System Notice</div>
+    <h1>Site is being<br>upgraded.</h1>
+    <p class="body-text">
+      We are currently upgrading our digital infrastructure.
+      All existing client work and deliverables remain unaffected.
+      We'll be back online shortly.
+    </p>
+    <ul class="list">
+      <li class="done">Back-end migration complete</li>
+      <li class="done">Content audit complete</li>
+      <li>Front-end rebuild — in progress</li>
+      <li>QA and testing — pending</li>
+      <li>Go live — soon</li>
+    </ul>
+  </div>
+  <div class="footer-bar">Fieldwork Agency &nbsp;&mdash;&nbsp; fieldworkagency.com &nbsp;&mdash;&nbsp; 2025</div>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terra Design Studio — Under Construction</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #c8622a;
+    color: #f5e8d8;
+    font-family: 'Trebuchet MS', 'Gill Sans', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-image:
+      linear-gradient(135deg, #c8622a 0%, #a8441a 60%, #8a3210 100%);
+  }
+  .top-band {
+    height: 4px;
+    background: repeating-linear-gradient(90deg, #f5c88a 0px, #f5c88a 20px, transparent 20px, transparent 40px);
+  }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+    text-align: center;
+  }
+  .texture-block {
+    width: 72px; height: 72px;
+    background: #f5c88a;
+    margin: 0 auto 2rem;
+    position: relative;
+    border-radius: 6px;
+  }
+  .texture-block::after {
+    content: 'T';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: 900;
+    color: #8a3210;
+  }
+  .brand {
+    font-size: 0.7rem;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: rgba(245,200,138,0.7);
+    margin-bottom: 0.5rem;
+  }
+  .brand-large {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #f5c88a;
+    letter-spacing: 0.05em;
+    margin-bottom: 3rem;
+  }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    font-weight: 700;
+    color: #fff5e8;
+    line-height: 1.2;
+    margin-bottom: 0.75rem;
+  }
+  .check-back {
+    font-size: 1.1rem;
+    color: #f5c88a;
+    font-style: italic;
+    margin-bottom: 2.5rem;
+  }
+  .clay-block {
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 1.5rem 2rem;
+    max-width: 420px;
+    font-size: 0.9rem;
+    color: rgba(245,232,216,0.75);
+    line-height: 1.8;
+    margin-bottom: 2.5rem;
+  }
+  .services {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 2rem;
+  }
+  .svc {
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(245,200,138,0.65);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .svc::before { content: '&#9632;'; font-size: 0.4rem; color: #f5c88a; }
+  .footer { font-size: 0.68rem; color: rgba(245,200,138,0.4); letter-spacing: 0.1em; }
+  .bottom-band { height: 4px; background: repeating-linear-gradient(90deg, #f5c88a 0px, #f5c88a 20px, transparent 20px, transparent 40px); }
+</style>
+</head>
+<body>
+  <div class="top-band"></div>
+  <div class="main">
+    <div class="texture-block"></div>
+    <p class="brand">Est. 2017</p>
+    <div class="brand-large">Terra Design Studio</div>
+    <h1>Under Construction</h1>
+    <p class="check-back">Check back soon &mdash;</p>
+    <div class="clay-block">
+      We're reshaping our digital presence with the same care and craft
+      we bring to every project. Warm tones, honest work, and bold ideas — coming soon.
+    </div>
+    <div class="services">
+      <span class="svc">Brand Identity</span>
+      <span class="svc">Print Design</span>
+      <span class="svc">Environmental</span>
+    </div>
+    <p class="footer">Terra Design Studio &copy; 2025 &nbsp;&mdash;&nbsp; terrastudio.design</p>
+  </div>
+  <div class="bottom-band"></div>
+</body>
+</html>

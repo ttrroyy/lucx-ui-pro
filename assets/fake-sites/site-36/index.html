@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>We're Refreshing Our Look</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f5f5f5;
+    color: #111;
+    font-family: 'Arial Black', 'Arial', sans-serif;
+    min-height: 100vh;
+    overflow: hidden;
+    position: relative;
+  }
+  /* Geometric background shapes */
+  .geo-tl {
+    position: fixed; top: -60px; left: -60px;
+    width: 220px; height: 220px;
+    background: #e63329;
+    border-radius: 0;
+    transform: rotate(15deg);
+  }
+  .geo-tr {
+    position: fixed; top: -40px; right: -40px;
+    width: 180px; height: 180px;
+    background: #1c5ba6;
+    border-radius: 0;
+    transform: rotate(-10deg);
+  }
+  .geo-bl {
+    position: fixed; bottom: -50px; left: -50px;
+    width: 200px; height: 200px;
+    background: #f5c800;
+    border-radius: 0;
+    transform: rotate(25deg);
+  }
+  .geo-br {
+    position: fixed; bottom: -30px; right: -30px;
+    width: 250px; height: 250px;
+    background: #1c5ba6;
+    border-radius: 0;
+    transform: rotate(-20deg);
+  }
+  .geo-mid-circle {
+    position: fixed; top: 50%; right: 8%;
+    transform: translateY(-50%);
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    background: #f5c800;
+    opacity: 0.5;
+  }
+  .geo-mid-bar {
+    position: fixed; bottom: 30%; left: 5%;
+    width: 40px; height: 200px;
+    background: #e63329;
+    opacity: 0.3;
+    transform: rotate(8deg);
+  }
+  /* Main content */
+  .center {
+    position: relative;
+    z-index: 10;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+  }
+  .flag {
+    display: flex;
+    gap: 0;
+    margin-bottom: 2rem;
+  }
+  .flag-block {
+    width: 24px;
+    height: 24px;
+  }
+  .flag-block.r { background: #e63329; }
+  .flag-block.y { background: #f5c800; }
+  .flag-block.b { background: #1c5ba6; }
+  h1 {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 900;
+    text-transform: uppercase;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    color: #111;
+    margin-bottom: 1rem;
+  }
+  h1 .red { color: #e63329; }
+  h1 .blue { color: #1c5ba6; }
+  h1 .yellow { color: #f5c800; -webkit-text-stroke: 2px #111; }
+  .sub {
+    font-size: 0.75rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #555;
+    margin-bottom: 2.5rem;
+    font-family: Arial, sans-serif;
+    font-weight: normal;
+  }
+  .card {
+    background: #fff;
+    border: 4px solid #111;
+    padding: 1.5rem 2.5rem;
+    max-width: 420px;
+    position: relative;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 6px; left: 6px;
+    right: -6px; bottom: -6px;
+    background: #111;
+    z-index: -1;
+  }
+  .card p {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: #333;
+    font-family: Arial, sans-serif;
+    font-weight: normal;
+  }
+  .dot-row {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 2rem;
+  }
+  .dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+  }
+  .dot.r { background: #e63329; }
+  .dot.y { background: #f5c800; border: 2px solid #999; }
+  .dot.b { background: #1c5ba6; }
+</style>
+</head>
+<body>
+<div class="geo-tl"></div>
+<div class="geo-tr"></div>
+<div class="geo-bl"></div>
+<div class="geo-br"></div>
+<div class="geo-mid-circle"></div>
+<div class="geo-mid-bar"></div>
+<div class="center">
+  <div class="flag">
+    <div class="flag-block r"></div>
+    <div class="flag-block y"></div>
+    <div class="flag-block b"></div>
+    <div class="flag-block r"></div>
+    <div class="flag-block y"></div>
+    <div class="flag-block b"></div>
+  </div>
+  <h1><span class="red">We're</span><br><span class="blue">Refreshing</span><br><span class="yellow">Our Look</span></h1>
+  <div class="sub">Big changes. Bold ideas. Coming soon.</div>
+  <div class="card">
+    <p>Our studio is currently in the process of a full visual identity overhaul. New brand, new site, same great creative energy. We'll be back with something worth the wait.</p>
+  </div>
+  <div class="dot-row">
+    <div class="dot r"></div>
+    <div class="dot y"></div>
+    <div class="dot b"></div>
+  </div>
+</div>
+</body>
+</html>

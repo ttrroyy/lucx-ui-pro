@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TechFix Support — Under Maintenance</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f0f4ff;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: #1565c0;
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  header .logo-text {
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  header .logo-text span { color: #90caf9; }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+  .icon-wrap {
+    width: 80px; height: 80px;
+    background: #1565c0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2rem;
+    margin: 0 auto 2rem;
+  }
+  h1 {
+    font-size: 1.9rem;
+    color: #0d3c6e;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  .status-badge {
+    display: inline-block;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.9rem;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+  }
+  p {
+    font-size: 1rem;
+    color: #4a6080;
+    max-width: 460px;
+    line-height: 1.7;
+    margin-bottom: 2rem;
+  }
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    max-width: 420px;
+    width: 100%;
+    margin-bottom: 2rem;
+  }
+  @media (max-width: 500px) { .info-grid { grid-template-columns: 1fr; } }
+  .info-card {
+    background: #fff;
+    border: 1px solid #dce6f5;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: left;
+  }
+  .info-card .ic-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #90a8c8; margin-bottom: 0.3rem; }
+  .info-card .ic-val { font-size: 0.95rem; color: #1565c0; font-weight: 600; }
+  footer {
+    background: #1565c0;
+    padding: 0.8rem 2rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: #90caf9;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo-text">TechFix <span>Support</span></div>
+  </header>
+  <div class="main">
+    <div class="icon-wrap">&#128295;</div>
+    <div class="status-badge">&#x26A0; Scheduled Maintenance</div>
+    <h1>Under Maintenance</h1>
+    <p>
+      Our support portal is currently undergoing scheduled system maintenance.
+      We apologize for the inconvenience and appreciate your patience.
+      For urgent issues, please contact your account manager directly.
+    </p>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="ic-label">Status</div>
+        <div class="ic-val">In Progress</div>
+      </div>
+      <div class="info-card">
+        <div class="ic-label">Estimated Time</div>
+        <div class="ic-val">2&ndash;4 Hours</div>
+      </div>
+      <div class="info-card">
+        <div class="ic-label">Affected Systems</div>
+        <div class="ic-val">Customer Portal</div>
+      </div>
+      <div class="info-card">
+        <div class="ic-label">Emergency Line</div>
+        <div class="ic-val">1-800-TECHFIX</div>
+      </div>
+    </div>
+  </div>
+  <footer>TechFix Support &copy; 2025 &nbsp;&bull;&nbsp; All rights reserved</footer>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fresh Market Online — Opening Soon</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f0faf4;
+    color: #2d6a4f;
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .top-strip {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, #74c69d, #40916c, #52b788, #74c69d);
+  }
+  .container {
+    max-width: 600px;
+    text-align: center;
+    padding: 3rem 2rem;
+  }
+  .leaf-icon {
+    font-size: 3rem;
+    margin-bottom: 1.5rem;
+    display: block;
+    filter: drop-shadow(0 2px 6px rgba(64,145,108,0.3));
+  }
+  .brand {
+    font-size: 0.85rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #40916c;
+    margin-bottom: 0.75rem;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+  }
+  h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: normal;
+    color: #1b4332;
+    line-height: 1.2;
+    margin-bottom: 1.5rem;
+  }
+  h1 em {
+    font-style: italic;
+    color: #40916c;
+  }
+  .divider {
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #74c69d, transparent);
+    margin: 1.5rem auto;
+  }
+  p {
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #52796f;
+    margin-bottom: 1rem;
+  }
+  .features {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin: 2rem 0;
+    flex-wrap: wrap;
+  }
+  .feature {
+    background: #fff;
+    border: 1px solid #d8f3dc;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    font-size: 0.85rem;
+    color: #40916c;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    letter-spacing: 0.05em;
+  }
+  .feature span {
+    display: block;
+    font-size: 1.5rem;
+    margin-bottom: 0.35rem;
+  }
+  .note {
+    font-size: 0.85rem;
+    color: #95d5b2;
+    letter-spacing: 0.1em;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    text-transform: uppercase;
+  }
+  .bottom-strip {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, #74c69d, #40916c, #52b788, #74c69d);
+  }
+</style>
+</head>
+<body>
+<div class="top-strip"></div>
+<div class="container">
+  <span class="leaf-icon">&#x1F33F;</span>
+  <div class="brand">Fresh Market Online</div>
+  <h1>Freshly Redesigned —<br><em>Opening Soon</em></h1>
+  <div class="divider"></div>
+  <p>We're giving our online shop a fresh makeover. New products, better navigation, and a smoother experience are on the way.</p>
+  <p>Our farmers and artisan suppliers are ready. We just need a little more time to get everything looking as good as it tastes.</p>
+  <div class="features">
+    <div class="feature"><span>&#x1F96C;</span>Seasonal Produce</div>
+    <div class="feature"><span>&#x1F9C0;</span>Artisan Goods</div>
+    <div class="feature"><span>&#x1F69A;</span>Local Delivery</div>
+  </div>
+  <div class="note">Check back very soon</div>
+</div>
+<div class="bottom-strip"></div>
+</body>
+</html>
