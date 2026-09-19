@@ -1,7 +1,5 @@
 # lucx-ui-pro
 
-🇬🇧 [English version](README_EN.md)
-
 Автоматическая установка панели [lucx-ui](https://github.com/AlexeyLCP/lucx-ui) с nginx, SSL, автосозданием инбаундов, self-hosted DoH и настройкой DNS в xray.
 
 - Debian 12 / Ubuntu 24,26
