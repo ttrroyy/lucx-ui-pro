@@ -562,7 +562,7 @@ cols = '"inbound_id",%s"sort_order","remark","address","port","security","finger
 vals = [inbound_id]
 if gid_col:
     vals.append(gid_hy2.strip("',"))
-vals.extend([0, "hy2", domain, port, "", "", '["h3"]'])
+vals.extend([0, "hy2", domain, port, "same", "", '["h3"]'])
 placeholders = ",".join(["?"] * len(vals))
 cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
 
