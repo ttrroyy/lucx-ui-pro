@@ -475,52 +475,33 @@ choose_hysteria2() {
 insert_hy2_inbound() {
     [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
-    local salamander_pass client_auth client_email client_sub client_uuid gid_col gid_hy2
+    local salamander_pass gid_col gid_hy2
     salamander_pass=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
-    client_auth=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
-    client_email=$(gen_random_string 10 | tr '[:upper:]' '[:lower:]')
-    client_sub=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
-    client_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')
     gid_col=""
     gid_hy2=""
     if sqlite3 "$XUIDB" "PRAGMA table_info(hosts);" | grep -qw "group_id"; then
         gid_col='"group_id",'
         gid_hy2="'$(gen_group_id)',"
     fi
-    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" \
-        "$client_auth" "$client_email" "$client_sub" "$client_uuid" <<'PY'
+    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
 import json, sqlite3, sys
-(db, port, salamander, domain, gid_col, gid_hy2,
- client_auth, client_email, client_sub, client_uuid) = sys.argv[1:11]
+db, port, salamander, domain, gid_col, gid_hy2 = sys.argv[1:7]
 port = int(port)
 cert = "/root/cert/%s/fullchain.pem" % domain
 key = "/root/cert/%s/privkey.pem" % domain
-settings = {
-    "version": 2,
-    "clients": [{
-        "id": client_uuid,
-        "email": client_email,
-        "auth": client_auth,
-        "subId": client_sub,
-        "enable": True,
-        "flow": "",
-        "limitIp": 0,
-        "totalGB": 0,
-        "expiryTime": 0,
-        "tgId": "",
-        "comment": "",
-        "reset": 0
-    }]
-}
+settings = {"version": 2, "clients": []}
 stream = {
     "network": "hysteria",
     "security": "tls",
-    "hysteriaSettings": {
-        "version": 2,
-        "udpIdleTimeout": 60
-    },
+    "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60},
     "tlsSettings": {
         "serverName": domain,
+        "minVersion": "1.2",
+        "maxVersion": "1.3",
+        "cipherSuites": "",
+        "rejectUnknownSni": False,
+        "disableSystemRoot": False,
+        "enableSessionResumption": False,
         "alpn": ["h3"],
         "certificates": [{
             "useFile": True,
@@ -534,7 +515,10 @@ stream = {
             "buildChain": False
         }],
         "settings": {
-            "fingerprint": ""
+            "fingerprint": "firefox",
+            "echConfigList": "",
+            "pinnedPeerCertSha256": [],
+            "verifyPeerCertByName": ""
         }
     },
     "finalmask": {
@@ -563,7 +547,7 @@ cols = '"inbound_id",%s"sort_order","remark","address","port","security","finger
 vals = [inbound_id]
 if gid_col:
     vals.append(gid_hy2.strip("',"))
-vals.extend([0, "hy2", domain, port, "tls", "firefox", '["h3"]'])
+vals.extend([0, "hy2", domain, port, "same", "", "[]"])
 placeholders = ",".join(["?"] * len(vals))
 cur.execute("INSERT INTO hosts (%s) VALUES (%s)" % (cols, placeholders), vals)
 con.commit()
@@ -621,10 +605,33 @@ import json, sqlite3, sys
 db, proto, remark, port, listen_addr, sub_host, password = sys.argv[1:8]
 port = int(port)
 if proto == "qwdtt":
-    settings = {"listenAddr": listen_addr, "wgPort": 56001, "password": password, "dns": "8.8.8.8", "configDir": "", "listenRaw": "0.0.0.0:56003", "listenDirect": "", "subHost": sub_host, "vkHashes": "", "clientPort": 9000, "workers": 16, "routeThroughXray": True, "outboundTag": ""}
+    settings = {
+        "listenAddr": listen_addr,
+        "wgPort": 56001,
+        "password": password,
+        "dns": "8.8.8.8",
+        "configDir": "",
+        "listenRaw": "0.0.0.0:56003",
+        "listenDirect": "",
+        "subHost": sub_host,
+        "vkHashes": "",
+        "clientPort": 9000,
+        "workers": 16,
+        "routeThroughXray": True,
+        "outboundTag": ""
+    }
 else:
-    settings = {"listenAddr": listen_addr, "password": password, "deviceId": "", "subHost": sub_host, "vkHashes": "", "routeThroughXray": True, "outboundTag": ""}
-sniffing = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}, ensure_ascii=False)
+    settings = {
+        "listenAddr": listen_addr,
+        "password": password,
+        "deviceId": "",
+        "subHost": sub_host,
+        "vkHashes": "",
+        "routeThroughXray": True,
+        "outboundTag": ""
+    }
+stream = {"security": "none"}
+sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
 tag = "inbound-qwdtt" if proto == "qwdtt" else "inbound-csqtt"
 con = sqlite3.connect(db, timeout=30)
 cur = con.cursor()
@@ -633,7 +640,13 @@ if row:
     con.close()
     print("exists")
     raise SystemExit(0)
-cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (1, 0, 0, 0, remark, 1, 0, "", port, proto, json.dumps(settings, ensure_ascii=False), "", tag, sniffing))
+cur.execute(
+    "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    (1, 0, 0, 0, remark, 1, 0, "", port, proto,
+     json.dumps(settings, ensure_ascii=False),
+     json.dumps(stream, ensure_ascii=False),
+     tag, json.dumps(sniffing, ensure_ascii=False)),
+)
 con.commit()
 con.close()
 print("ok", proto, port)
