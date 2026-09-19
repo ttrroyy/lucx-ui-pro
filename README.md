@@ -2,12 +2,12 @@
 
 🇬🇧 [English version](README_EN.md)
 
-Автоматическая установка панели [3x-ui](https://github.com/MHSanaei/3x-ui) с nginx, SSL, Clash-подпиской и диагностикой сети.
+Автоматическая установка панели [3x-ui](https://github.com/AlexeyLCP/lucx-ui) с nginx, SSL, автосозданием инбаундов, self-hosted DNS и настройкой DNS в xray.
 
-- Debian 12 / Ubuntu 24
-- Два домена или поддомена (для панели и для REALITY)
+- Debian 12 / Ubuntu 24,26
+- Два домена или поддомена (для панели/DNS и для REALITY)
 - Автоматическое обновление SSL-сертификатов
-- Поддержка VLESS+REALITY, VLESS+WebSocket, VLESS+XHTTP, Trojan+gRPC — всё через порт 443
+- Поддержка VLESS TCP REALITY, VLESS XHTTP TLS — через порт 443, а так же Hysteria 2, qWDTT и CSQTT
 
 ---
 
@@ -15,14 +15,12 @@
 
 | Компонент | Описание |
 |-----------|----------|
-| 3x-ui | VPN-панель с веб-интерфейсом |
+| lucx-ui | VPN-панель с веб-интерфейсом |
 | nginx | Обратный прокси, SNI-роутинг |
 | certbot | Let's Encrypt SSL |
-| Clash-подписка | Автоматическая выдача `clash.yaml` по User-Agent |
-| Диагностика | MTR-трейсер + тест скорости в браузере |
 | Фейковый сайт | Случайный HTML-сайт-прикрытие |
 | Бэкап | Скрипт резервного копирования |
-| AdGuard Home | Опционально: DNS с блокировкой рекламы (DoH) — отдельный скрипт |
+| AdGuard Home | Опционально: DNS с блокировкой рекламы (DoH) |
 
 ---
 
