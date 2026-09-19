@@ -1,4 +1,4 @@
-# 3x-ui-pro
+# lucx-ui-pro
 
 🇬🇧 [English version](README_EN.md)
 
