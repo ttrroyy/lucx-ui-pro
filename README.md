@@ -39,15 +39,6 @@ bash x-ui-latest.sh
 ```
 
 ---
-## Патч
-
-Применить текущие фиксы к существующей установке (без изменений БД):
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-patch.sh)
-```
-
----
 
 ## AdGuard Home (опционально)
 
