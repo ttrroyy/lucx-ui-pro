@@ -585,12 +585,69 @@ choose_extra_inbound() {
     echo
 }
 
+install_shareonly_client_sync() {
+    [[ ! -f $XUIDB ]] && return 0
+    sqlite3 "$XUIDB" <<'SQL'
+DROP TRIGGER IF EXISTS lucx_shareonly_clients_ins;
+DROP TRIGGER IF EXISTS lucx_shareonly_clients_del;
+CREATE TRIGGER lucx_shareonly_clients_ins
+AFTER INSERT ON client_inbounds
+WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = NEW.inbound_id AND protocol IN ('qwdtt','csqtt'))
+BEGIN
+  UPDATE inbounds SET settings = json_insert(
+    json_set(
+      settings,
+      '$.clients',
+      CASE WHEN json_type(json_extract(settings, '$.clients')) = 'array'
+           THEN json_extract(settings, '$.clients')
+           ELSE json('[]') END
+    ),
+    '$.clients[#]',
+    json_object(
+      'email', COALESCE((SELECT email FROM clients WHERE id = NEW.client_id), ''),
+      'enable', json('true')
+    )
+  )
+  WHERE id = NEW.inbound_id
+    AND COALESCE((SELECT email FROM clients WHERE id = NEW.client_id), '') != ''
+    AND NOT EXISTS (
+      SELECT 1 FROM json_each(
+        CASE WHEN json_type(json_extract(inbounds.settings, '$.clients')) = 'array'
+             THEN json_extract(inbounds.settings, '$.clients')
+             ELSE json('[]') END
+      )
+      WHERE json_extract(value, '$.email') = (SELECT email FROM clients WHERE id = NEW.client_id)
+    );
+END;
+CREATE TRIGGER lucx_shareonly_clients_del
+AFTER DELETE ON client_inbounds
+WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = OLD.inbound_id AND protocol IN ('qwdtt','csqtt'))
+BEGIN
+  UPDATE inbounds SET settings = json_set(
+    settings,
+    '$.clients',
+    (
+      SELECT json_group_array(json(value))
+      FROM json_each(
+        CASE WHEN json_type(json_extract(inbounds.settings, '$.clients')) = 'array'
+             THEN json_extract(inbounds.settings, '$.clients')
+             ELSE json('[]') END
+      )
+      WHERE json_extract(value, '$.email') IS NOT (SELECT email FROM clients WHERE id = OLD.client_id)
+    )
+  )
+  WHERE id = OLD.inbound_id;
+END;
+SQL
+}
+
 insert_extra_inbound() {
     [[ "${EXTRA_INBOUND:-1}" == "1" ]] && return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add extra inbound."; return 1; }
     [[ -z "${IP4:-}" ]] && get_server_ip
-    local proto remark port listen_addr sub_host pass
+    local proto remark port listen_addr sub_host pass web_pass
     pass=$(gen_random_string 16)
+    web_pass=$(gen_random_string 24)
     if [[ "$EXTRA_INBOUND" == "2" ]]; then
         proto='qwdtt'; remark='qWDTT'; port=56000
         listen_addr='0.0.0.0:56000'
@@ -600,13 +657,15 @@ insert_extra_inbound() {
         listen_addr='0.0.0.0:46000'
         sub_host="${IP4}"
     fi
-    python3 - "$XUIDB" "$proto" "$remark" "$port" "$listen_addr" "$sub_host" "$pass" <<'PY'
+    python3 - "$XUIDB" "$proto" "$remark" "$port" "$listen_addr" "$sub_host" "$pass" "$web_pass" <<'PY'
 import json, sqlite3, sys
-db, proto, remark, port, listen_addr, sub_host, password = sys.argv[1:8]
+db, proto, remark, port, listen_addr, sub_host, password, web_pass = sys.argv[1:9]
 port = int(port)
 if proto == "qwdtt":
     settings = {
         "clients": [],
+        "remark": remark,
+        "enabled": True,
         "listenAddr": listen_addr,
         "wgPort": 56001,
         "password": password,
@@ -624,11 +683,15 @@ if proto == "qwdtt":
 else:
     settings = {
         "clients": [],
+        "remark": remark,
+        "enabled": True,
         "listenAddr": listen_addr,
         "password": password,
         "deviceId": "",
+        "webPass": web_pass,
         "subHost": sub_host,
         "vkHashes": "",
+        "configDir": "",
         "routeThroughXray": True,
         "outboundTag": ""
     }
@@ -654,6 +717,7 @@ con.close()
 print("ok", proto, port)
 PY
     [[ $? -eq 0 ]] || { msg_err "Failed to insert ${remark} inbound."; return 1; }
+    install_shareonly_client_sync
     msg_ok "Inbound ${remark} created (port ${port})."
 }
 
