@@ -1406,6 +1406,7 @@ VALUES (
     '{
   "clients": [],
   "decryption": "none",
+  "encryption": "none",
   "fallbacks": []
 }',
     '{
@@ -1447,6 +1448,7 @@ VALUES (
     '{
   "clients": [],
   "decryption": "none",
+  "encryption": "none",
   "fallbacks": []
 }',
     '{
