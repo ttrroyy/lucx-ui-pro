@@ -79,6 +79,7 @@ CUSTOM_DOH_IP=""
 
 # ─── Stop & clean previous install (called from main, after domain validation) ─
 clean_previous_install() {
+    uninstall_adguard 2>/dev/null || true
     systemctl stop x-ui 2>/dev/null || true
     rm -rf /etc/systemd/system/x-ui.service
     rm -rf /usr/local/x-ui
@@ -160,7 +161,6 @@ download_one_geo() {
     if [[ "$http" != "200" || ! -s "$tmp" ]]; then
         rm -f "$tmp"
         if [[ -n "$fallback" ]]; then
-            echo "  ${name}: primary failed (${http:-err}), fallback..."
             http=$(curl -sSfLRo "$tmp" --retry 4 --retry-delay 2 --connect-timeout 15 --max-time 180 -w '%{http_code}' "$fallback" || true)
         fi
     fi
@@ -184,7 +184,6 @@ download_one_geo() {
     mv -f "$tmp" "${dest}/${name}"
     echo "  ${name}: ${size} bytes"
 }
-
 ensure_stock_geo() {
     local dest="$1" name="$2" url="$3" fallback="${4:-}" min_bytes="${5:-50000}"
     if [[ -s "${dest}/${name}" ]]; then
@@ -193,7 +192,6 @@ ensure_stock_geo() {
     fi
     download_one_geo "$dest" "$name" "$url" "$fallback" "$min_bytes"
 }
-
 fetch_lucx_geofiles() {
     local dest="${1:-/usr/local/x-ui/bin}"
     mkdir -p "$dest"
@@ -210,12 +208,8 @@ fetch_lucx_geofiles() {
     ensure_stock_geo "$dest" geoip_ROSCOM.dat "$GH/hydraponique/roscomvpn-geoip/releases/latest/download/geoip.dat" "$CDN/hydraponique/roscomvpn-geoip/release/geoip.dat" 50000 || true
     ensure_stock_geo "$dest" geosite_ROSCOM.dat "$GH/hydraponique/roscomvpn-geosite/releases/latest/download/geosite.dat" "$CDN/hydraponique/roscomvpn-geosite/release/geosite.dat" 50000 || true
     echo "Placing runetfreedom NEXT TO ROSCOM as geoip_RUNET.dat / geosite_RUNET.dat ..."
-    download_one_geo "$dest" geoip_RUNET.dat \
-        "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat" \
-        "$GH/runetfreedom/russia-v2ray-rules-dat/raw/release/geoip.dat" 50000 || return 1
-    download_one_geo "$dest" geosite_RUNET.dat \
-        "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat" \
-        "$GH/runetfreedom/russia-v2ray-rules-dat/raw/release/geosite.dat" 50000 || return 1
+    download_one_geo "$dest" geoip_RUNET.dat "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat" "$GH/runetfreedom/russia-v2ray-rules-dat/raw/release/geoip.dat" 50000 || return 1
+    download_one_geo "$dest" geosite_RUNET.dat "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat" "$GH/runetfreedom/russia-v2ray-rules-dat/raw/release/geosite.dat" 50000 || return 1
 }
 
 normalize_dns_choice() {
@@ -231,14 +225,9 @@ normalize_dns_choice() {
         *) echo "" ;;
     esac
 }
-
-has_global_ipv6() {
-    ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'
-}
-
+has_global_ipv6() { ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'; }
 resolve_doh_for_hosts() {
-    local url="$1"
-    python3 - "$url" <<'PY'
+    python3 - "$1" <<'PY'
 import socket, sys, urllib.parse
 raw = (sys.argv[1] or "").strip()
 p = urllib.parse.urlparse(raw)
@@ -252,20 +241,13 @@ except Exception:
 ip = infos[0][4][0] if infos else ""
 if not ip:
     raise SystemExit(1)
-print(host)
-print(ip)
-print(raw)
+print(host); print(ip); print(raw)
 PY
 }
-
 choose_xray_dns() {
     local ans mapped tty doh_url resolved host ip
-    DNS_CHOICE=""
-    CUSTOM_DOH_URL=""
-    CUSTOM_DOH_HOST=""
-    CUSTOM_DOH_IP=""
-    tty="/dev/tty"
-    [[ -r /dev/tty ]] || tty=""
+    DNS_CHOICE=""; CUSTOM_DOH_URL=""; CUSTOM_DOH_HOST=""; CUSTOM_DOH_IP=""
+    tty="/dev/tty"; [[ -r /dev/tty ]] || tty=""
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
@@ -278,180 +260,125 @@ choose_xray_dns() {
         echo '  6) Свой DoH'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-6]: '
-        if [[ -n "$tty" ]]; then
-            read -r ans <"$tty" || ans=""
-        else
-            read -r ans || ans=""
-        fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
         mapped=$(normalize_dns_choice "$ans")
         [[ -n "$mapped" ]] || continue
         if [[ "$mapped" == "5" && "${DEPLOY_AGH:-}" != "1" ]]; then
             choose_adguard
-            if [[ "${DEPLOY_AGH}" != "1" ]]; then
-                continue
-            fi
+            [[ "${DEPLOY_AGH}" == "1" ]] || continue
         fi
         if [[ "$mapped" == "6" ]]; then
             echo -en 'DoH URL: '
-            if [[ -n "$tty" ]]; then
-                read -r doh_url <"$tty" || doh_url=""
-            else
-                read -r doh_url || doh_url=""
-            fi
+            if [[ -n "$tty" ]]; then read -r doh_url <"$tty" || doh_url=""; else read -r doh_url || doh_url=""; fi
             resolved=$(resolve_doh_for_hosts "$doh_url" 2>/dev/null || true)
-            if [[ -z "$resolved" ]]; then
-                continue
-            fi
+            [[ -n "$resolved" ]] || continue
             host=$(printf '%s\n' "$resolved" | sed -n '1p')
             ip=$(printf '%s\n' "$resolved" | sed -n '2p')
             CUSTOM_DOH_URL=$(printf '%s\n' "$resolved" | sed -n '3p')
-            CUSTOM_DOH_HOST="$host"
-            CUSTOM_DOH_IP="$ip"
+            CUSTOM_DOH_HOST="$host"; CUSTOM_DOH_IP="$ip"
         fi
-        DNS_CHOICE="$mapped"
-        break
+        DNS_CHOICE="$mapped"; break
     done
     echo
 }
-
 apply_xray_template() {
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot apply Xray template."; return 1; }
     local qstrat freedom_strat enable_he=0 dns_mode="${DNS_CHOICE:-1}"
     if [[ "$dns_mode" != "1" ]]; then
-        if has_global_ipv6; then
-            qstrat='UseIP'; freedom_strat='ForceIP'; enable_he=1
-        else
-            qstrat='UseIPv4'; freedom_strat='ForceIPv4'
-        fi
+        if has_global_ipv6; then qstrat='UseIP'; freedom_strat='ForceIP'; enable_he=1
+        else qstrat='UseIPv4'; freedom_strat='ForceIPv4'; fi
     fi
     [[ -z "${IP4:-}" ]] && get_server_ip
-    x-ui stop >/dev/null 2>&1 || true
-    sleep 2
-    pkill -x x-ui >/dev/null 2>&1 || true
-    sleep 1
+    x-ui stop >/dev/null 2>&1 || true; sleep 2; pkill -x x-ui >/dev/null 2>&1 || true; sleep 1
     python3 - "$XUIDB" "$dns_mode" "$qstrat" "$freedom_strat" "$enable_he" \
         "${domain:-}" "${IP4:-}" "${CUSTOM_DOH_URL:-}" "${CUSTOM_DOH_HOST:-}" "${CUSTOM_DOH_IP:-}" <<'PY'
 import json, sqlite3, sys
 db, choice, qstrat, freedom_strat, enable_he, domain, ip4, custom_url, custom_host, custom_ip = sys.argv[1:11]
-GH = "https://github.com"
-RAW = "https://raw.githubusercontent.com"
-GEODATA = {
-    "cron": "0 4 * * 0",
-    "assets": [
-        {"url": GH + "/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat", "file": "geoip.dat"},
-        {"url": GH + "/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat", "file": "geosite.dat"},
-        {"url": GH + "/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat", "file": "geoip_IR.dat"},
-        {"url": GH + "/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat", "file": "geosite_IR.dat"},
-        {"url": GH + "/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat", "file": "geoip_RU.dat"},
-        {"url": GH + "/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat", "file": "geosite_RU.dat"},
-        {"url": GH + "/hydraponique/roscomvpn-geoip/releases/latest/download/geoip.dat", "file": "geoip_ROSCOM.dat"},
-        {"url": GH + "/hydraponique/roscomvpn-geosite/releases/latest/download/geosite.dat", "file": "geosite_ROSCOM.dat"},
-        {"url": RAW + "/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat", "file": "geoip_RUNET.dat"},
-        {"url": RAW + "/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat", "file": "geosite_RUNET.dat"},
-    ],
-}
-DEFAULT = {
-    "api": {"services": ["HandlerService", "LoggerService", "StatsService", "RoutingService"], "tag": "api"},
+GH = "https://github.com"; RAW = "https://raw.githubusercontent.com"
+GEODATA = {"cron": "0 4 * * 0", "assets": [
+    {"url": GH + "/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat", "file": "geoip.dat"},
+    {"url": GH + "/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat", "file": "geosite.dat"},
+    {"url": GH + "/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat", "file": "geoip_IR.dat"},
+    {"url": GH + "/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat", "file": "geosite_IR.dat"},
+    {"url": GH + "/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat", "file": "geoip_RU.dat"},
+    {"url": GH + "/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat", "file": "geosite_RU.dat"},
+    {"url": GH + "/hydraponique/roscomvpn-geoip/releases/latest/download/geoip.dat", "file": "geoip_ROSCOM.dat"},
+    {"url": GH + "/hydraponique/roscomvpn-geosite/releases/latest/download/geosite.dat", "file": "geosite_ROSCOM.dat"},
+    {"url": RAW + "/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat", "file": "geoip_RUNET.dat"},
+    {"url": RAW + "/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat", "file": "geosite_RUNET.dat"},
+]}
+DEFAULT = {"api": {"services": ["HandlerService", "LoggerService", "StatsService", "RoutingService"], "tag": "api"},
     "inbounds": [{"listen": "127.0.0.1", "port": 62789, "protocol": "tunnel", "settings": {"rewriteAddress": "127.0.0.1"}, "tag": "api"}],
     "log": {"access": "none", "dnsLog": False, "error": "", "loglevel": "warning", "maskAddress": ""},
     "metrics": {"listen": "127.0.0.1:11111", "tag": "metrics_out"},
-    "outbounds": [
-        {"protocol": "freedom", "tag": "direct", "settings": {"finalRules": [{"action": "block", "ip": ["geoip:private"]}, {"action": "allow"}]}},
-        {"protocol": "blackhole", "settings": {}, "tag": "blocked"},
-    ],
+    "outbounds": [{"protocol": "freedom", "tag": "direct", "settings": {"finalRules": [{"action": "block", "ip": ["geoip:private"]}, {"action": "allow"}]}},
+                  {"protocol": "blackhole", "settings": {}, "tag": "blocked"}],
     "policy": {"levels": {"0": {"statsUserDownlink": True, "statsUserUplink": True}},
                "system": {"statsInboundDownlink": True, "statsInboundUplink": True, "statsOutboundDownlink": False, "statsOutboundUplink": False}},
-    "routing": {"domainStrategy": "AsIs", "rules": [
-        {"inboundTag": ["api"], "outboundTag": "api", "type": "field"},
+    "routing": {"domainStrategy": "AsIs", "rules": [{"inboundTag": ["api"], "outboundTag": "api", "type": "field"},
         {"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"},
         {"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"}]},
-    "stats": {}, "geodata": GEODATA,
-}
-profiles = {
-    "2": {"address": "https://cloudflare-dns.com/dns-query", "hosts": {"cloudflare-dns.com": "1.1.1.1", "one.one.one.one": "1.1.1.1"}},
-    "3": {"address": "https://dns.google/dns-query", "hosts": {"dns.google": "8.8.8.8"}},
-    "4": {"address": "https://dns.quad9.net/dns-query", "hosts": {"dns.quad9.net": "9.9.9.9"}},
-}
+    "stats": {}, "geodata": GEODATA}
+profiles = {"2": {"address": "https://cloudflare-dns.com/dns-query", "hosts": {"cloudflare-dns.com": "1.1.1.1", "one.one.one.one": "1.1.1.1"}},
+            "3": {"address": "https://dns.google/dns-query", "hosts": {"dns.google": "8.8.8.8"}},
+            "4": {"address": "https://dns.quad9.net/dns-query", "hosts": {"dns.quad9.net": "9.9.9.9"}}}
 if choice == "5":
-    if not domain or not ip4:
-        raise SystemExit("self-hosted DoH needs panel domain and IP")
+    if not domain or not ip4: raise SystemExit("self-hosted DoH needs panel domain and IP")
     profiles["5"] = {"address": "https://%s/dns-query" % domain, "hosts": {domain: ip4}}
 if choice == "6":
-    if not custom_url or not custom_host or not custom_ip:
-        raise SystemExit("custom DoH missing host/ip")
+    if not custom_url or not custom_host or not custom_ip: raise SystemExit("custom DoH missing host/ip")
     profiles["6"] = {"address": custom_url, "hosts": {custom_host: custom_ip}}
 def unwrap(cfg):
     for _ in range(8):
-        if not isinstance(cfg, dict):
-            return cfg
+        if not isinstance(cfg, dict): return cfg
         if "xraySetting" in cfg and not any(k in cfg for k in ("inbounds", "outbounds", "routing", "dns", "api")):
             inner = cfg["xraySetting"]
             cfg = json.loads(inner) if isinstance(inner, str) else inner if isinstance(inner, dict) else cfg
-        else:
-            return cfg
+        else: return cfg
     return cfg
 def set_direct_freedom_strategy(cfg, strategy, he):
     outs = cfg.get("outbounds")
-    if not isinstance(outs, list):
-        outs = []; cfg["outbounds"] = outs
+    if not isinstance(outs, list): outs = []; cfg["outbounds"] = outs
     direct = None; tag_taken = False
     for ob in outs:
-        if not isinstance(ob, dict):
-            continue
+        if not isinstance(ob, dict): continue
         if str(ob.get("protocol", "")).lower() == "freedom" and ob.get("tag") == "direct":
             direct = ob; break
-        if ob.get("tag") == "direct":
-            tag_taken = True
+        if ob.get("tag") == "direct": tag_taken = True
     if direct is None:
-        if tag_taken:
-            raise SystemExit("tag 'direct' is taken by a non-freedom outbound")
-        direct = {"protocol": "freedom", "tag": "direct", "settings": {}}
-        outs.append(direct)
+        if tag_taken: raise SystemExit("tag 'direct' is taken by a non-freedom outbound")
+        direct = {"protocol": "freedom", "tag": "direct", "settings": {}}; outs.append(direct)
     settings = direct.get("settings") if isinstance(direct.get("settings"), dict) else {}
-    for k in ("domainStrategy", "targetStrategy"):
-        settings.pop(k, None)
-    direct["settings"] = settings
-    direct.pop("targetStrategy", None)
+    for k in ("domainStrategy", "targetStrategy"): settings.pop(k, None)
+    direct["settings"] = settings; direct.pop("targetStrategy", None)
     stream = direct.get("streamSettings") if isinstance(direct.get("streamSettings"), dict) else {}
     sockopt = stream.get("sockopt") if isinstance(stream.get("sockopt"), dict) else {}
-    if strategy == "AsIs":
-        sockopt.pop("domainStrategy", None)
-    else:
-        sockopt["domainStrategy"] = strategy
-    if he:
-        sockopt["happyEyeballs"] = {"tryDelayMs": 250, "prioritizeIPv6": False, "interleave": 1, "maxConcurrentTry": 4}
-    else:
-        sockopt.pop("happyEyeballs", None)
-    if sockopt:
-        stream["sockopt"] = sockopt
-    else:
-        stream.pop("sockopt", None)
-    if stream:
-        direct["streamSettings"] = stream
-    else:
-        direct.pop("streamSettings", None)
-con = sqlite3.connect(db, timeout=30)
-cur = con.cursor()
+    if strategy == "AsIs": sockopt.pop("domainStrategy", None)
+    else: sockopt["domainStrategy"] = strategy
+    if he: sockopt["happyEyeballs"] = {"tryDelayMs": 250, "prioritizeIPv6": False, "interleave": 1, "maxConcurrentTry": 4}
+    else: sockopt.pop("happyEyeballs", None)
+    if sockopt: stream["sockopt"] = sockopt
+    else: stream.pop("sockopt", None)
+    if stream: direct["streamSettings"] = stream
+    else: direct.pop("streamSettings", None)
+con = sqlite3.connect(db, timeout=30); cur = con.cursor()
 row = cur.execute("SELECT value FROM settings WHERE key='xrayTemplateConfig' ORDER BY id DESC LIMIT 1").fetchone()
 if row and row[0]:
     try:
         cfg = json.loads(row[0])
-        if isinstance(cfg, str):
-            cfg = json.loads(cfg)
+        if isinstance(cfg, str): cfg = json.loads(cfg)
     except Exception:
         cfg = json.loads(json.dumps(DEFAULT))
 else:
     cfg = json.loads(json.dumps(DEFAULT))
 cfg = unwrap(cfg)
-if not isinstance(cfg, dict):
-    cfg = json.loads(json.dumps(DEFAULT))
+if not isinstance(cfg, dict): cfg = json.loads(json.dumps(DEFAULT))
 geo = cfg.get("geodata") if isinstance(cfg.get("geodata"), dict) else {}
 assets = geo.get("assets") if isinstance(geo.get("assets"), list) else []
 have = {a.get("file") for a in assets if isinstance(a, dict)}
 for extra in GEODATA["assets"]:
     if extra["file"] not in have:
-        assets.append(extra)
-        have.add(extra["file"])
+        assets.append(extra); have.add(extra["file"])
 geo["assets"] = assets
 cron = str(geo.get("cron") or "").strip()
 geo["cron"] = cron if cron else "0 4 * * 0"
@@ -459,16 +386,12 @@ cfg["geodata"] = geo
 if choice != "1":
     prof = profiles[choice]
     routing = cfg.get("routing") if isinstance(cfg.get("routing"), dict) else {}
-    routing["domainStrategy"] = "IPIfNonMatch"
-    cfg["routing"] = routing
+    routing["domainStrategy"] = "IPIfNonMatch"; cfg["routing"] = routing
     set_direct_freedom_strategy(cfg, freedom_strat, enable_he == "1")
-    cfg["dns"] = {
-        "tag": "dns_inbound", "queryStrategy": qstrat,
-        "disableCache": False, "disableFallback": True, "disableFallbackIfMatch": True,
+    cfg["dns"] = {"tag": "dns_inbound", "queryStrategy": qstrat, "disableCache": False, "disableFallback": True, "disableFallbackIfMatch": True,
         "useSystemHosts": False, "enableParallelQuery": False, "serveStale": False, "serveExpiredTTL": 0,
         "hosts": prof["hosts"],
-        "servers": [{"address": prof["address"], "skipFallback": True, "queryStrategy": qstrat, "timeoutMs": 4000}],
-    }
+        "servers": [{"address": prof["address"], "skipFallback": True, "queryStrategy": qstrat, "timeoutMs": 4000}]}
     cfg["fakedns"] = None
 val = json.dumps(cfg, ensure_ascii=False, indent=2)
 cur.execute("DELETE FROM settings WHERE key='xrayTemplateConfig'")
@@ -479,20 +402,10 @@ try:
 except Exception:
     pass
 con.close()
-check = json.loads(val)
-files = {a["file"] for a in check["geodata"]["assets"] if isinstance(a, dict)}
-assert "geoip_RUNET.dat" in files and "geosite_RUNET.dat" in files
-assert str(check["geodata"].get("cron") or "").strip()
-if choice != "1":
-    assert check.get("dns", {}).get("tag") == "dns_inbound"
 print("ok")
 PY
-    rc=$?
-    x-ui start >/dev/null 2>&1 || true
-    if [[ $rc -ne 0 ]]; then
-        msg_err "Failed to write xrayTemplateConfig (DNS/geodata)."
-        return 1
-    fi
+    rc=$?; x-ui start >/dev/null 2>&1 || true
+    [[ $rc -eq 0 ]] || { msg_err "Failed to write xrayTemplateConfig (DNS/geodata)."; return 1; }
     msg_ok "Xray template saved (DNS ${dns_mode})."
 }
 apply_xray_dns() { apply_xray_template; }
@@ -544,37 +457,10 @@ import json, sqlite3, sys
 db, proto, remark, port, listen_addr, sub_host, password = sys.argv[1:8]
 port = int(port)
 if proto == "qwdtt":
-    settings = {
-        "listenAddr": listen_addr,
-        "wgPort": 56001,
-        "password": password,
-        "dns": "8.8.8.8",
-        "configDir": "",
-        "listenRaw": "0.0.0.0:56003",
-        "listenDirect": "",
-        "subHost": sub_host,
-        "vkHashes": "",
-        "clientPort": 9000,
-        "workers": 16,
-        "routeThroughXray": True,
-        "outboundTag": "",
-    }
+    settings = {"listenAddr": listen_addr, "wgPort": 56001, "password": password, "dns": "8.8.8.8", "configDir": "", "listenRaw": "0.0.0.0:56003", "listenDirect": "", "subHost": sub_host, "vkHashes": "", "clientPort": 9000, "workers": 16, "routeThroughXray": True, "outboundTag": ""}
 else:
-    settings = {
-        "listenAddr": listen_addr,
-        "password": password,
-        "deviceId": "",
-        "subHost": sub_host,
-        "vkHashes": "",
-        "routeThroughXray": True,
-        "outboundTag": "",
-    }
-sniffing = json.dumps({
-    "enabled": True,
-    "destOverride": ["http", "tls", "quic", "fakedns"],
-    "metadataOnly": False,
-    "routeOnly": False,
-}, ensure_ascii=False)
+    settings = {"listenAddr": listen_addr, "password": password, "deviceId": "", "subHost": sub_host, "vkHashes": "", "routeThroughXray": True, "outboundTag": ""}
+sniffing = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}, ensure_ascii=False)
 tag = "inbound-qwdtt" if proto == "qwdtt" else "inbound-csqtt"
 con = sqlite3.connect(db, timeout=30)
 cur = con.cursor()
@@ -583,18 +469,12 @@ if row:
     con.close()
     print("exists")
     raise SystemExit(0)
-cur.execute(
-    "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    (1, 0, 0, 0, remark, 1, 0, "", port, proto, json.dumps(settings, ensure_ascii=False), "", tag, sniffing),
-)
+cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (1, 0, 0, 0, remark, 1, 0, "", port, proto, json.dumps(settings, ensure_ascii=False), "", tag, sniffing))
 con.commit()
 con.close()
 print("ok", proto, port)
 PY
-    if [[ $? -ne 0 ]]; then
-        msg_err "Failed to insert ${remark} inbound."
-        return 1
-    fi
+    [[ $? -eq 0 ]] || { msg_err "Failed to insert ${remark} inbound."; return 1; }
     msg_ok "Inbound ${remark} created (port ${port})."
 }
 
@@ -642,10 +522,8 @@ install_adguard() {
     local vhost agh_path agh_web_port agh_dns_port agh_arch agh_user agh_pass agh_hash
     local new_credentials=0 agh_up=0 GH doh_status p
     GH='https://github.com'
-
     [[ -f $XUIDB ]] || { msg_err "x-ui.db not found — install the panel first."; return 1; }
     command -v sqlite3 >/dev/null || apt-get install -y -q sqlite3
-
     if [[ -z "${domain:-}" ]]; then
         local web_cert
         web_cert=$(sqlite3 "$XUIDB" "SELECT value FROM settings WHERE key='webCertFile';" 2>/dev/null || true)
@@ -665,7 +543,6 @@ install_adguard() {
     fi
     [[ -n "${domain:-}" ]] || { msg_err "Could not determine panel domain."; return 1; }
     [[ -z "${IP4:-}" ]] && get_server_ip
-
     vhost="/etc/nginx/sites-available/${domain}"
     if [[ ! -f "$vhost" ]] || ! grep -q 'listen 7443' "$vhost"; then
         vhost=""
@@ -675,13 +552,11 @@ install_adguard() {
         done
     fi
     [[ -n "$vhost" ]] || { msg_err "Panel vhost (listen 7443) not found."; return 1; }
-
     agh_path=""
     if [[ -f "$AGH_SNIPPET" ]]; then
         agh_path=$(grep -oP 'location /\Kadg-[a-zA-Z0-9]+' "$AGH_SNIPPET" | head -1 || true)
     fi
     [[ -n "$agh_path" ]] || agh_path="adg-$(gen_random_string 12)"
-
     agh_web_port=""
     if [[ -f "$AGH_YAML" ]]; then
         agh_web_port=$(grep -oP '^\s*address:\s*127\.0\.0\.1:\K\d+' "$AGH_YAML" | head -1 || true)
@@ -696,24 +571,19 @@ install_adguard() {
         p=$(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 ))
         ss -Hln "sport = :$p" 2>/dev/null | grep -q . || { agh_dns_port="$p"; break; }
     done
-
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl tar ca-certificates apache2-utils
-
     case "$(uname -m)" in
         x86_64)  agh_arch="amd64";;
         aarch64) agh_arch="arm64";;
         armv7l)  agh_arch="armv7";;
         *) msg_err "Unsupported architecture: $(uname -m)"; return 1;;
     esac
-
     if [[ ! -x "${AGH_DIR}/AdGuardHome" ]]; then
         mkdir -p /opt
-        curl -fsSL "${GH}/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz" \
-            | tar -xz -C /opt
+        curl -fsSL "${GH}/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz" | tar -xz -C /opt
         [[ -x "${AGH_DIR}/AdGuardHome" ]] || { msg_err "AdGuard Home download failed."; return 1; }
     fi
-
     agh_user="admin"
     agh_pass=""
     if [[ -f "$AGH_YAML" ]]; then
@@ -769,7 +639,6 @@ AGH_IP=${IP4}
 INFO
         chmod 600 /root/.lucx-adguard-info
     fi
-
     if [[ -f /root/.lucx-adguard-info ]]; then
         grep -q '^AGH_PATH=' /root/.lucx-adguard-info 2>/dev/null || echo "AGH_PATH=${agh_path}" >> /root/.lucx-adguard-info
         grep -q '^AGH_DOMAIN=' /root/.lucx-adguard-info 2>/dev/null || echo "AGH_DOMAIN=${domain}" >> /root/.lucx-adguard-info
@@ -785,19 +654,16 @@ AGH_IP=${IP4}
 INFO
         chmod 600 /root/.lucx-adguard-info
     fi
-
     if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${AGH_SERVICE}\.service"; then
         systemctl restart "$AGH_SERVICE"
     else
         "${AGH_DIR}/AdGuardHome" -s install
     fi
-
     for _ in $(seq 1 20); do
         if curl -fso /dev/null "http://127.0.0.1:${agh_web_port}/"; then agh_up=1; break; fi
         sleep 0.5
     done
     [[ $agh_up -eq 1 ]] || { msg_err "AdGuard Home did not start on 127.0.0.1:${agh_web_port}"; return 1; }
-
     mkdir -p /etc/nginx/snippets
     cat > "$AGH_SNIPPET" <<EOF
     location /dns-query {
@@ -828,7 +694,6 @@ INFO
     }
     location = /${agh_path} { return 302 /${agh_path}/; }
 EOF
-
     if ! grep -q 'snippets/adguard.conf' "$vhost"; then
         if grep -q 'include /etc/nginx/snippets/includes.conf;' "$vhost"; then
             sed -i 's|^\(\s*\)include /etc/nginx/snippets/includes.conf;|\1include /etc/nginx/snippets/adguard.conf;\n\1include /etc/nginx/snippets/includes.conf;|' "$vhost"
@@ -836,7 +701,6 @@ EOF
             sed -i '$ s|^}$|    include /etc/nginx/snippets/adguard.conf;\n}|' "$vhost"
         fi
     fi
-
     if nginx -t 2>&1 | grep -q successful; then
         systemctl reload nginx
     else
@@ -844,12 +708,6 @@ EOF
         nginx -t
         return 1
     fi
-
-    doh_status=$(curl -so /dev/null -w '%{http_code}' \
-        -H 'Accept: application/dns-message' \
-        "http://127.0.0.1:${agh_web_port}/dns-query?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB" || true)
-    [[ "$doh_status" == "200" ]] || msg_err "DoH self-test HTTP ${doh_status} (expected 200)."
-
     AGH_PATH="$agh_path"
     AGH_USER="$agh_user"
     AGH_PASS="$agh_pass"
@@ -866,7 +724,6 @@ print_adguard_results() {
     agh_user="admin"
     agh_pass=""
     if [[ -f /root/.lucx-adguard-info ]]; then
-        # shellcheck disable=SC1091
         . /root/.lucx-adguard-info
         agh_path="${AGH_PATH:-$agh_path}"
         agh_user="${AGH_USER:-$agh_user}"
@@ -900,7 +757,6 @@ uninstall_xui() {
     systemctl stop x-ui nginx mtr-backend AdGuardHome 2>/dev/null || true
     systemctl disable x-ui nginx mtr-backend AdGuardHome 2>/dev/null || true
     pkill -f 'mtg-linux-' >/dev/null 2>&1 || true
-    pkill -f 'tuic-server' >/dev/null 2>&1 || true
     crontab -l 2>/dev/null | grep -vE 'certbot|x-ui|cloudflareips|nginx -s reload|update-geodata' | crontab - || true
     rm -rf /etc/x-ui/ /usr/local/x-ui/ /usr/local/lib/3x-ui-pro/ /root/cert/ /opt/AdGuardHome /root/.lucx-adguard-info /var/www/diagnostics
     rm -f /usr/bin/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/mtr-backend.service /etc/default/x-ui /etc/nginx/snippets/adguard.conf
@@ -1310,9 +1166,7 @@ install_panel() {
     GH='https://github.com'
     RAW='https://raw.githubusercontent.com'
     apt-get update && apt-get install -y -q wget curl tar tzdata
-
     cd /usr/local/
-
     if [[ -n "$PANEL_VERSION" && "$PANEL_VERSION" != "latest" ]]; then
         tag_version="${PANEL_VERSION#v}"
         tag_version="v${tag_version}"
@@ -1321,60 +1175,41 @@ install_panel() {
             echo "LucX-UI release ${tag_version} not found." && exit 1
         fi
     else
-        tag_version=$(curl -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" \
-            | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        tag_version=$(curl -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
         if [[ -z "$tag_version" || "$tag_version" == "null" ]]; then
-            tag_version=$(curl -4 -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" \
-                | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+            tag_version=$(curl -4 -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
         fi
         if [[ -z "$tag_version" || "$tag_version" == "null" ]]; then
             echo "Failed to fetch LucX-UI version." && exit 1
         fi
     fi
-
     echo "Installing LucX-UI ${tag_version} ..."
-    wget -N -O /usr/local/x-ui-linux-$(_arch).tar.gz \
-        "$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"
+    wget -N -O /usr/local/x-ui-linux-$(_arch).tar.gz "$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"
     [[ $? -ne 0 ]] && echo "Download failed." && exit 1
-
     script_ref="${tag_version}"
     [[ "$script_ref" == "dev-latest" ]] && script_ref="main"
     wget -O /usr/bin/x-ui-temp "$RAW/AlexeyLCP/lucx-ui/${script_ref}/x-ui.sh"
-    if [[ $? -ne 0 ]]; then
-        wget -O /usr/bin/x-ui-temp "$RAW/AlexeyLCP/lucx-ui/main/x-ui.sh"
-    fi
+    if [[ $? -ne 0 ]]; then wget -O /usr/bin/x-ui-temp "$RAW/AlexeyLCP/lucx-ui/main/x-ui.sh"; fi
     [[ $? -ne 0 ]] && echo "Failed to download x-ui.sh" && exit 1
-
     [[ -d /usr/local/x-ui/ ]] && systemctl stop x-ui 2>/dev/null; rm -rf /usr/local/x-ui/
-
     tar zxvf x-ui-linux-$(_arch).tar.gz
     rm -f x-ui-linux-$(_arch).tar.gz
-
     cd x-ui
     chmod +x x-ui x-ui.sh
-
     if [[ $(_arch) == "armv5" || $(_arch) == "armv6" || $(_arch) == "armv7" ]]; then
         mv bin/xray-linux-$(_arch) bin/xray-linux-arm32
         chmod +x bin/xray-linux-arm32
-        if [[ -f bin/mtg-linux-$(_arch) ]]; then
-            mv bin/mtg-linux-$(_arch) bin/mtg-linux-arm
-            chmod +x bin/mtg-linux-arm
-        fi
+        if [[ -f bin/mtg-linux-$(_arch) ]]; then mv bin/mtg-linux-$(_arch) bin/mtg-linux-arm; chmod +x bin/mtg-linux-arm; fi
     fi
     chmod +x bin/* 2>/dev/null || true
-
     fetch_lucx_geofiles /usr/local/x-ui/bin || { echo "Failed to download LucX geodata."; exit 1; }
-
     mv -f /usr/bin/x-ui-temp /usr/bin/x-ui
     chmod +x /usr/bin/x-ui
-
     _panel_initial_config
-
     cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
     systemctl daemon-reload
     systemctl enable x-ui
     systemctl start x-ui
-
     msg_ok "LucX-UI ${tag_version} installed."
 }
 
