@@ -475,18 +475,24 @@ choose_hysteria2() {
 insert_hy2_inbound() {
     [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Hysteria2 inbound."; return 1; }
-    local salamander_pass gid_col gid_hy2
+    local salamander_pass gid_col gid_hy2 flag
     salamander_pass=$(gen_random_string 16 | tr '[:upper:]' '[:lower:]')
+    flag="${EMOJI_FLAG:-}"
+    if [[ -z "$flag" ]]; then
+        flag=$(LC_ALL=en_US.UTF-8 curl -s --max-time 10 https://ipwho.is/ | jq -r '.flag.emoji' 2>/dev/null)
+        [[ -z "$flag" || "$flag" == "null" ]] && flag="🌐"
+    fi
     gid_col=""
     gid_hy2=""
     if sqlite3 "$XUIDB" "PRAGMA table_info(hosts);" | grep -qw "group_id"; then
         gid_col='"group_id",'
         gid_hy2="'$(gen_group_id)',"
     fi
-    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" <<'PY'
+    python3 - "$XUIDB" "$hy2_port" "$salamander_pass" "$domain" "$gid_col" "$gid_hy2" "$flag" <<'PY'
 import json, sqlite3, sys
-db, port, salamander, domain, gid_col, gid_hy2 = sys.argv[1:7]
+db, port, salamander, domain, gid_col, gid_hy2, flag = sys.argv[1:8]
 port = int(port)
+remark = ("%s hy2" % flag).strip()
 cert = "/root/cert/%s/fullchain.pem" % domain
 key = "/root/cert/%s/privkey.pem" % domain
 settings = {"version": 2, "clients": []}
@@ -537,7 +543,7 @@ if row:
     raise SystemExit(0)
 cur.execute(
     "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    (1, 0, 0, 0, "hy2", 1, 0, "", port, "hysteria",
+    (1, 0, 0, 0, remark, 1, 0, "", port, "hysteria",
      json.dumps(settings, ensure_ascii=False),
      json.dumps(stream, ensure_ascii=False),
      tag, json.dumps(sniffing, ensure_ascii=False)),
@@ -633,7 +639,8 @@ BEGIN
              THEN json_extract(inbounds.settings, '$.clients')
              ELSE json('[]') END
       )
-      WHERE json_extract(value, '$.email') IS NOT (SELECT email FROM clients WHERE id = OLD.client_id)
+      WHERE json_extract(value, '$.email') != (SELECT email FROM clients WHERE id = OLD.client_id)
+         OR (SELECT email FROM clients WHERE id = OLD.client_id) IS NULL
     )
   )
   WHERE id = OLD.inbound_id;
@@ -1412,6 +1419,7 @@ configure_xui_db() {
     fi
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s --max-time 10 https://ipwho.is/ | jq -r '.flag.emoji' 2>/dev/null)
     [[ -z "$emoji_flag" || "$emoji_flag" == "null" ]] && emoji_flag="🌐"
+    EMOJI_FLAG="$emoji_flag"
 
     local sub_uri="https://${domain}/${sub_path}/"
     local json_uri="https://${domain}/${json_path}?name="
@@ -1468,7 +1476,7 @@ INSERT INTO "settings" ("key","value") VALUES ("datepicker",          'gregorian
 INSERT INTO "inbounds"
     ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing")
 VALUES (
-    '1','0','0','0','${emoji_flag} reality','1','0','','8443','vless',
+    '1','0','0','0','${emoji_flag} tcp-reality','1','0','','8443','vless',
     '{
   "clients": [],
   "decryption": "none",
@@ -1510,7 +1518,7 @@ VALUES (
 INSERT INTO "inbounds"
     ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing")
 VALUES (
-    '1','0','0','0','${emoji_flag} xhttp','1','0','/dev/shm/uds2023.sock,0666','0','vless',
+    '1','0','0','0','${emoji_flag} xhttp-tls','1','0','/dev/shm/uds2023.sock,0666','0','vless',
     '{
   "clients": [],
   "decryption": "none",
@@ -1556,7 +1564,7 @@ VALUES (
 INSERT INTO "hosts" ("inbound_id",${gid_col}"sort_order","remark","address","port","security","fingerprint","alpn")
 VALUES
     ((SELECT id FROM inbounds WHERE tag='inbound-8443'),           ${gid_reality} 0, 'tcp-reality', '${domain}', 443, 'same', '',        '[]'),
-    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]');
+    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp-tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]');
 EOF
 
     /usr/local/x-ui/x-ui setting \
