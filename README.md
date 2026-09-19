@@ -59,14 +59,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mozaroc/3x-ui-pro/main/x-ui-
 
 ---
 
-## Удаление
-
-```bash
-bash x-ui-latest.sh -uninstall y
-```
-
----
-
 ## Параметры запуска
 
 | Параметр | Описание |
