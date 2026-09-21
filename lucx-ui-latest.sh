@@ -69,7 +69,8 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 DNS_CHOICE=""
-EXTRA_INBOUND="1"
+DEPLOY_QWDTT=""
+DEPLOY_CSQTT=""
 DEPLOY_AGH=""
 DEPLOY_HY2=""
 ADGUARD_ONLY=""
@@ -411,35 +412,11 @@ PY
 }
 apply_xray_dns() { apply_xray_template; }
 
-choose_hysteria2() {
-    local ans mapped tty p
-    DEPLOY_HY2=""
-    hy2_port=""
+choose_hy2_port() {
+    local p tty
     tty="/dev/tty"
     [[ -r /dev/tty ]] || tty=""
-    while true; do
-        echo
-        msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        msg_inf 'Ставить Hysteria2?'
-        echo '  1) Да'
-        echo '  2) Нет'
-        msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        echo -en 'Выбор [1-2]: '
-        if [[ -n "$tty" ]]; then
-            read -r ans <"$tty" || ans=""
-        else
-            read -r ans || ans=""
-        fi
-        mapped=$(echo "$ans" | tr -d '[:space:]')
-        case "$mapped" in
-            1) DEPLOY_HY2="1"; break ;;
-            2) DEPLOY_HY2="2"; break ;;
-        esac
-    done
-    if [[ "$DEPLOY_HY2" != "1" ]]; then
-        echo
-        return 0
-    fi
+    hy2_port=""
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
@@ -469,6 +446,93 @@ choose_hysteria2() {
         hy2_port="$p"
         break
     done
+    echo
+}
+
+choose_extra_inbounds() {
+    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c ok
+    local -a toks
+    DEPLOY_HY2="2"
+    DEPLOY_QWDTT=""
+    DEPLOY_CSQTT=""
+    hy2_port=""
+    tty="/dev/tty"
+    [[ -r /dev/tty ]] || tty=""
+    while true; do
+        echo
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        msg_inf 'Дополнительные инбаунды (перечислите цифры через запятую без пробелов):'
+        echo '1 - Без дополнительных инбаундов'
+        echo '2 - Hysteria2'
+        echo '3 - qWDTT'
+        echo '4 - CSQTT'
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        echo -en 'Выберите инбаунды:'
+        if [[ -n "$tty" ]]; then
+            read -r ans <"$tty" || ans=""
+        else
+            read -r ans || ans=""
+        fi
+        mapped=$(echo "$ans" | tr -d '[:space:]')
+        [[ -n "$mapped" ]] || continue
+
+        has1=0
+        has_valid=0
+        want_hy2=0
+        want_q=0
+        want_c=0
+        IFS=',' read -ra toks <<< "$mapped"
+        for tok in "${toks[@]}"; do
+            case "$tok" in
+                1) has1=1 ;;
+                2) has_valid=1; want_hy2=1 ;;
+                3) has_valid=1; want_q=1 ;;
+                4) has_valid=1; want_c=1 ;;
+            esac
+        done
+
+        echo
+        if [[ "$has1" -eq 1 || "$has_valid" -eq 0 ]]; then
+            msg_inf 'Вы не выбрали ни одного инбаунда, все верно?'
+            echo '1 - Да'
+            echo '2 - Нет, выбрать снова'
+            want_hy2=0; want_q=0; want_c=0
+        else
+            names=""
+            [[ "$want_hy2" -eq 1 ]] && names+="Hysteria2, "
+            [[ "$want_q" -eq 1 ]] && names+="qWDTT, "
+            [[ "$want_c" -eq 1 ]] && names+="CSQTT, "
+            names="${names%, }"
+            msg_inf "Вы выбрали ${names}, все верно?"
+            echo '1 - Да'
+            echo '2 - Нет, выбрать снова'
+        fi
+        ok=""
+        while true; do
+            echo -en 'Выбор [1-2]: '
+            if [[ -n "$tty" ]]; then
+                read -r confirm <"$tty" || confirm=""
+            else
+                read -r confirm || confirm=""
+            fi
+            confirm=$(echo "$confirm" | tr -d '[:space:]')
+            case "$confirm" in
+                1) ok=1; break ;;
+                2) ok=0; break ;;
+            esac
+        done
+        [[ "$ok" == "1" ]] || continue
+
+        if [[ "$want_hy2" -eq 1 ]]; then DEPLOY_HY2="1"; else DEPLOY_HY2="2"; fi
+        if [[ "$want_q" -eq 1 ]]; then DEPLOY_QWDTT="1"; else DEPLOY_QWDTT=""; fi
+        if [[ "$want_c" -eq 1 ]]; then DEPLOY_CSQTT="1"; else DEPLOY_CSQTT=""; fi
+        break
+    done
+    if [[ "$DEPLOY_HY2" == "1" ]]; then
+        choose_hy2_port
+    else
+        hy2_port=""
+    fi
     echo
 }
 
@@ -564,33 +628,6 @@ PY
     msg_ok "Inbound Hysteria2 created (UDP ${hy2_port})."
 }
 
-choose_extra_inbound() {
-    local ans mapped tty
-    EXTRA_INBOUND=""
-    tty="/dev/tty"
-    [[ -r /dev/tty ]] || tty=""
-    while true; do
-        echo
-        msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        msg_inf 'Дополнительные инбаунды (только один):'
-        echo '  1) Без дополнительного инбаунда'
-        echo '  2) qWDTT'
-        echo '  3) CSQTT'
-        msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        echo -en 'Выбор [1-3]: '
-        if [[ -n "$tty" ]]; then
-            read -r ans <"$tty" || ans=""
-        else
-            read -r ans || ans=""
-        fi
-        mapped=$(echo "$ans" | tr -d '[:space:]')
-        case "$mapped" in
-            1|2|3) EXTRA_INBOUND="$mapped"; break ;;
-        esac
-    done
-    echo
-}
-
 install_shareonly_client_sync() {
     [[ ! -f $XUIDB ]] && return 0
     sqlite3 "$XUIDB" <<'SQL'
@@ -649,22 +686,15 @@ SQL
 }
 
 insert_extra_inbound() {
-    [[ "${EXTRA_INBOUND:-1}" == "1" ]] && return 0
+    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add extra inbound."; return 1; }
     [[ -z "${IP4:-}" ]] && get_server_ip
     local proto remark port listen_addr sub_host pass web_pass
-    pass=$(gen_random_string 16)
-    web_pass=$(gen_random_string 24)
-    if [[ "$EXTRA_INBOUND" == "2" ]]; then
-        proto='qwdtt'; remark='qWDTT'; port=56000
-        listen_addr='0.0.0.0:56000'
-        sub_host="${IP4}:56000"
-    else
-        proto='csqtt'; remark='CSQTT'; port=46000
-        listen_addr='0.0.0.0:46000'
-        sub_host="${IP4}"
-    fi
-    python3 - "$XUIDB" "$proto" "$remark" "$port" "$listen_addr" "$sub_host" "$pass" "$web_pass" <<'PY'
+    _insert_one_extra() {
+        proto="$1"; remark="$2"; port="$3"; listen_addr="$4"; sub_host="$5"
+        pass=$(gen_random_string 16)
+        web_pass=$(gen_random_string 24)
+        python3 - "$XUIDB" "$proto" "$remark" "$port" "$listen_addr" "$sub_host" "$pass" "$web_pass" <<'PY'
 import json, sqlite3, sys
 db, proto, remark, port, listen_addr, sub_host, password, web_pass = sys.argv[1:9]
 port = int(port)
@@ -723,9 +753,16 @@ con.commit()
 con.close()
 print("ok", proto, port)
 PY
-    [[ $? -eq 0 ]] || { msg_err "Failed to insert ${remark} inbound."; return 1; }
+        [[ $? -eq 0 ]] || { msg_err "Failed to insert ${remark} inbound."; return 1; }
+        msg_ok "Inbound ${remark} created (port ${port})."
+    }
+    if [[ "${DEPLOY_QWDTT}" == "1" ]]; then
+        _insert_one_extra qwdtt qWDTT 56000 '0.0.0.0:56000' "${IP4}:56000" || return 1
+    fi
+    if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
+        _insert_one_extra csqtt CSQTT 46000 '0.0.0.0:46000' "${IP4}" || return 1
+    fi
     install_shareonly_client_sync
-    msg_ok "Inbound ${remark} created (port ${port})."
 }
 
 choose_adguard() {
@@ -1678,11 +1715,12 @@ setup_firewall() {
     if [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]]; then
         ufw allow ${hy2_port}/udp
     fi
-    if [[ "${EXTRA_INBOUND:-1}" == "2" ]]; then
+    if [[ "${DEPLOY_QWDTT}" == "1" ]]; then
         ufw allow 56000/udp
         ufw allow 56001/udp
         ufw allow 56003/udp
-    elif [[ "${EXTRA_INBOUND:-1}" == "3" ]]; then
+    fi
+    if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
         ufw allow 46000/udp
     fi
     ufw --force enable
@@ -1715,14 +1753,12 @@ show_results() {
 main() {
     choose_adguard
     choose_xray_dns
-    choose_hysteria2
-    choose_extra_inbound
+    choose_extra_inbounds
     validate_domains
     clean_previous_install
     install_packages
     get_server_ip
     get_ssl_certs
-
     if systemctl is-active --quiet x-ui; then
         x-ui restart
     else
