@@ -31,11 +31,11 @@ wget -qO lucx-ui-latest.sh https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro
 bash lucx-ui-latest.sh -install y -subdomain panel.example.com -reality_domain r.example.com
 ```
 
-# panel.example.com - домен панели
+1. panel.example.com - домен панели
 
-# r.example.com - домен reality
+2. r.example.com - домен reality
 
-# для них нужно создать A-запись на IP вашего VPS
+Для них нужно создать A-запись на IP вашего VPS
 
 **Полное удаление (панель + nginx + AdGuard)**
 
