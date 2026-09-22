@@ -73,6 +73,9 @@ DEPLOY_QWDTT=""
 DEPLOY_CSQTT=""
 DEPLOY_AGH=""
 DEPLOY_HY2=""
+DEPLOY_TPROXY=""
+webproxy_domain=""
+TPROXY_SECRET=""
 ADGUARD_ONLY=""
 ADGUARD_UNINSTALL=""
 CUSTOM_DOH_URL=""
@@ -109,8 +112,12 @@ gen_group_id() {
 }
 
 check_free() {
-    nc -z 127.0.0.1 "$1" &>/dev/null
-    return $?
+    if command -v nc >/dev/null 2>&1; then
+        timeout 1 nc -w 1 -z 127.0.0.1 "$1" &>/dev/null
+        return $?
+    fi
+    ss -Hltn "sport = :$1" 2>/dev/null | grep -q . && return 0
+    return 1
 }
 
 make_port() {
@@ -434,7 +441,7 @@ choose_hy2_port() {
             continue
         fi
         case "$p" in
-            80|46000|56000|56001|56003)
+            80|443|46000|56000|56001|56003|7443|8443|9443|11443)
                 msg_err "Порт ${p} занят."
                 continue
                 ;;
@@ -450,14 +457,12 @@ choose_hy2_port() {
 }
 
 choose_extra_inbounds() {
-    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c ok
+    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c want_tproxy ok arch
     local -a toks
-    DEPLOY_HY2="2"
-    DEPLOY_QWDTT=""
-    DEPLOY_CSQTT=""
-    hy2_port=""
-    tty="/dev/tty"
-    [[ -r /dev/tty ]] || tty=""
+    DEPLOY_HY2="2"; DEPLOY_QWDTT=""; DEPLOY_CSQTT=""; DEPLOY_TPROXY=""
+    hy2_port=""; webproxy_domain=""; TPROXY_SECRET=""
+    arch=$(uname -m)
+    tty="/dev/tty"; [[ -r /dev/tty ]] || tty=""
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
@@ -466,21 +471,17 @@ choose_extra_inbounds() {
         echo '2 - Hysteria2'
         echo '3 - qWDTT'
         echo '4 - CSQTT'
+        echo '5 - Telegram WEB-proxy'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выберите инбаунды:'
-        if [[ -n "$tty" ]]; then
-            read -r ans <"$tty" || ans=""
-        else
-            read -r ans || ans=""
-        fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         [[ -n "$mapped" ]] || continue
-
-        has1=0
-        has_valid=0
-        want_hy2=0
-        want_q=0
-        want_c=0
+        if [[ ",$mapped," == *",5,"* && "$arch" != "x86_64" ]]; then
+            msg_err "Telegram WEB-proxy доступен только на x86_64 (MTProxy)."
+            continue
+        fi
+        has1=0; has_valid=0; want_hy2=0; want_q=0; want_c=0; want_tproxy=0
         IFS=',' read -ra toks <<< "$mapped"
         for tok in "${toks[@]}"; do
             case "$tok" in
@@ -488,52 +489,244 @@ choose_extra_inbounds() {
                 2) has_valid=1; want_hy2=1 ;;
                 3) has_valid=1; want_q=1 ;;
                 4) has_valid=1; want_c=1 ;;
+                5) has_valid=1; want_tproxy=1 ;;
             esac
         done
-
         echo
         if [[ "$has1" -eq 1 || "$has_valid" -eq 0 ]]; then
             msg_inf 'Вы не выбрали ни одного инбаунда, все верно?'
-            echo '1 - Да'
-            echo '2 - Нет, выбрать снова'
-            want_hy2=0; want_q=0; want_c=0
+            echo '1 - Да'; echo '2 - Нет, выбрать снова'
+            want_hy2=0; want_q=0; want_c=0; want_tproxy=0
         else
             names=""
             [[ "$want_hy2" -eq 1 ]] && names+="Hysteria2, "
             [[ "$want_q" -eq 1 ]] && names+="qWDTT, "
             [[ "$want_c" -eq 1 ]] && names+="CSQTT, "
+            [[ "$want_tproxy" -eq 1 ]] && names+="Telegram WEB-proxy, "
             names="${names%, }"
             msg_inf "Вы выбрали ${names}, все верно?"
-            echo '1 - Да'
-            echo '2 - Нет, выбрать снова'
+            echo '1 - Да'; echo '2 - Нет, выбрать снова'
         fi
         ok=""
         while true; do
             echo -en 'Выбор [1-2]: '
-            if [[ -n "$tty" ]]; then
-                read -r confirm <"$tty" || confirm=""
-            else
-                read -r confirm || confirm=""
-            fi
+            if [[ -n "$tty" ]]; then read -r confirm <"$tty" || confirm=""; else read -r confirm || confirm=""; fi
             confirm=$(echo "$confirm" | tr -d '[:space:]')
-            case "$confirm" in
-                1) ok=1; break ;;
-                2) ok=0; break ;;
-            esac
+            case "$confirm" in 1) ok=1; break ;; 2) ok=0; break ;; esac
         done
         [[ "$ok" == "1" ]] || continue
-
         if [[ "$want_hy2" -eq 1 ]]; then DEPLOY_HY2="1"; else DEPLOY_HY2="2"; fi
         if [[ "$want_q" -eq 1 ]]; then DEPLOY_QWDTT="1"; else DEPLOY_QWDTT=""; fi
         if [[ "$want_c" -eq 1 ]]; then DEPLOY_CSQTT="1"; else DEPLOY_CSQTT=""; fi
+        if [[ "$want_tproxy" -eq 1 ]]; then DEPLOY_TPROXY="1"; else DEPLOY_TPROXY=""; fi
         break
     done
-    if [[ "$DEPLOY_HY2" == "1" ]]; then
-        choose_hy2_port
-    else
-        hy2_port=""
-    fi
+    if [[ "$DEPLOY_HY2" == "1" ]]; then choose_hy2_port; else hy2_port=""; fi
     echo
+}
+
+domain_a_ok() {
+    local d="$1"
+    [[ -n "$d" && -n "${IP4:-}" ]] || return 1
+    if command -v python3 >/dev/null 2>&1; then
+        timeout 12 python3 - "$d" "$IP4" <<'PY'
+import random, socket, struct, sys
+name = sys.argv[1].strip().rstrip(".").lower()
+want = sys.argv[2].strip()
+def encode_name(n):
+    out = bytearray()
+    for label in n.split("."):
+        lab = label.encode("ascii")
+        if not (1 <= len(lab) <= 63):
+            raise ValueError("bad label")
+        out.append(len(lab)); out.extend(lab)
+    out.append(0)
+    return bytes(out)
+def skip_name(data, off):
+    while True:
+        if off >= len(data):
+            raise ValueError("trunc")
+        l = data[off]
+        if l == 0:
+            return off + 1
+        if l & 0xC0 == 0xC0:
+            return off + 2
+        if l & 0xC0:
+            raise ValueError("edns")
+        off += 1 + l
+def udp_lookup(server, timeout=1.2):
+    tid = random.randint(0, 65535)
+    pkt = struct.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0) + encode_name(name) + struct.pack(">HH", 1, 1)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(pkt, (server, 53))
+        data, _ = sock.recvfrom(4096)
+    finally:
+        sock.close()
+    if len(data) < 12:
+        raise ValueError("short")
+    rtid, flags, qd, an, ns, ar = struct.unpack(">HHHHHH", data[:12])
+    if rtid != tid:
+        raise ValueError("tid")
+    rcode = flags & 0xF
+    if rcode not in (0, 3):
+        raise ValueError("rcode")
+    off = 12
+    for _ in range(qd):
+        off = skip_name(data, off) + 4
+    ips = []
+    for _ in range(an):
+        off = skip_name(data, off)
+        typ, clas, ttl, rdlen = struct.unpack(">HHIH", data[off:off+10])
+        off += 10
+        rdata = data[off:off+rdlen]; off += rdlen
+        if typ == 1 and rdlen == 4:
+            ips.append(socket.inet_ntoa(rdata))
+    return ips, rcode
+answered = False
+ips = set()
+for srv in ("1.1.1.1", "8.8.8.8"):
+    try:
+        got, rcode = udp_lookup(srv)
+        answered = True
+        ips.update(got)
+        if want in ips:
+            raise SystemExit(0)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+if want in ips:
+    raise SystemExit(0)
+if answered:
+    raise SystemExit(1)
+try:
+    ips.update(info[4][0] for info in socket.getaddrinfo(name, None, socket.AF_INET, socket.SOCK_STREAM))
+except Exception:
+    pass
+if want in ips:
+    raise SystemExit(0)
+try:
+    import json, urllib.request
+    for url in ("https://cloudflare-dns.com/dns-query?name=%s&type=A" % name, "https://dns.google/resolve?name=%s&type=A" % name):
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/dns-json"})
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                data = json.loads(resp.read().decode())
+            for ans in data.get("Answer") or []:
+                if ans.get("type") == 1 and ans.get("data"):
+                    ips.add(str(ans["data"]).strip())
+            if want in ips:
+                raise SystemExit(0)
+            if int(data.get("Status", 0)) in (0, 3):
+                raise SystemExit(1)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+except Exception:
+    pass
+raise SystemExit(0 if want in ips else 1)
+PY
+        return $?
+    fi
+    local a
+    a=$(timeout 3 getent ahostsv4 "$d" 2>/dev/null | awk 'NR==1{print $1}')
+    [[ "$a" == "$IP4" ]]
+}
+read_tty_line() {
+    local tty="/dev/tty" ans=""
+    [[ -r /dev/tty ]] || tty=""
+    if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+    printf '%s' "$ans"
+}
+ui() { if [[ -w /dev/tty ]]; then printf '%s' "$1" >/dev/tty; else printf '%s' "$1" >&2; fi; }
+ui_err() { if [[ -w /dev/tty ]]; then msg_err "$1" >/dev/tty; else msg_err "$1" >&2; fi; }
+prompt_domain_a_record() {
+    local prompt="$1" d
+    while true; do
+        ui "$prompt"
+        d=$(read_tty_line)
+        d=$(printf '%s' "$d" | LC_ALL=C tr -d '[:space:]' | LC_ALL=C tr '[:upper:]' '[:lower:]')
+        [[ -n "$d" ]] || continue
+        if [[ ! "$d" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
+            ui_err "Некорректный домен: ${d}"
+            continue
+        fi
+        if ! domain_a_ok "$d"; then
+            ui_err "A-запись ${d} не указывает на ${IP4}."
+            continue
+        fi
+        printf '%s' "$d"
+        return 0
+    done
+}
+choose_webproxy_domain() {
+    [[ "${DEPLOY_TPROXY}" == "1" ]] || return 0
+    [[ -n "${IP4:-}" ]] || get_server_ip
+    local d p; webproxy_domain=""
+    while true; do
+        printf -v p 'Домен для Telegram WEB-proxy (создайте A-запись на IP "%s"): ' "$IP4"
+        d=$(prompt_domain_a_record "$p")
+        if [[ "$d" == "$domain" || "$d" == "$reality_domain" ]]; then
+            ui_err "Домен WEB-proxy должен отличаться от домена панели и Reality."
+            continue
+        fi
+        webproxy_domain="$d"; break
+    done
+    echo
+}
+install_tproxy_site() {
+    [[ "${DEPLOY_TPROXY}" == "1" ]] || return 0
+    local idx site_id url tries=0 copied=0
+    mkdir -p /var/www/tproxy
+    while (( tries < 8 )); do
+        tries=$((tries + 1)); idx=$(( (RANDOM % FAKE_SITE_COUNT) + 1 ))
+        site_id=$(printf "site-%02d" "$idx")
+        url="${GITHUB_RAW}/assets/fake-sites/${site_id}/index.html"
+        if curl -fsSL "$url" -o /var/www/tproxy/index.html && [[ -s /var/www/tproxy/index.html ]]; then copied=1; break; fi
+    done
+    if [[ "$copied" -ne 1 && -s /var/www/html/index.html ]]; then cp -f /var/www/html/index.html /var/www/tproxy/index.html; copied=1; fi
+    if [[ ! -s /var/www/tproxy/index.html ]]; then printf '%s\n' '<!DOCTYPE html><html><head><meta charset="utf-8"><title></title></head><body></body></html>' > /var/www/tproxy/index.html; fi
+    [[ -s /var/www/tproxy/index.html ]] || { msg_err "Не удалось создать /var/www/tproxy/index.html"; return 1; }
+    chown -R www-data:www-data /var/www/tproxy 2>/dev/null || true
+    chmod 644 /var/www/tproxy/index.html
+    msg_ok "WEB-proxy camouflage installed in /var/www/tproxy."
+}
+insert_tproxy_inbound() {
+    [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]] || return 0
+    [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add Telegram WEB-proxy inbound."; return 1; }
+    local flag secret cert key _ipwho
+    secret=$(openssl rand -hex 16 | tr '[:upper:]' '[:lower:]')
+    [[ ${#secret} -eq 32 ]] || { msg_err "Failed to generate WEB-proxy secret."; return 1; }
+    TPROXY_SECRET="$secret"
+    flag="${EMOJI_FLAG:-}"
+    if [[ -z "$flag" ]]; then
+        _ipwho='http'; _ipwho="${_ipwho}s://ipwho.is/"
+        flag=$(LC_ALL=en_US.UTF-8 curl -s --max-time 10 "$_ipwho" | jq -r '.flag.emoji' 2>/dev/null)
+        [[ -z "$flag" || "$flag" == "null" ]] && flag="🌐"
+    fi
+    cert="/root/cert/${webproxy_domain}/fullchain.pem"
+    key="/root/cert/${webproxy_domain}/privkey.pem"
+    python3 - "$XUIDB" "$webproxy_domain" "$secret" "$cert" "$key" "$flag" <<'PY'
+import json, sqlite3, sys
+db, hostname, secret, cert, key, flag = sys.argv[1:7]
+remark = ("%s web-proxy" % flag).strip()
+settings = {"clients": [], "port": 11443, "hostname": hostname, "secret": secret, "siteSource": "dir", "siteDir": "/var/www/tproxy", "siteUpstream": "", "carrierMode": "https", "certFile": cert, "keyFile": key, "externalTLS": False, "behindCover": False, "routeThroughXray": False, "outboundTag": "", "routeXrayPort": 0}
+stream = {"security": "none"}
+sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
+tag = "inbound-tproxy"
+con = sqlite3.connect(db, timeout=30)
+cur = con.cursor()
+row = cur.execute("SELECT id FROM inbounds WHERE protocol='tproxy' OR tag=? LIMIT 1", (tag,)).fetchone()
+if row:
+    con.close(); print("exists"); raise SystemExit(0)
+cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (1, 0, 0, 0, remark, 1, 0, "127.0.0.1", 11443, "tproxy", json.dumps(settings, ensure_ascii=False), json.dumps(stream, ensure_ascii=False), tag, json.dumps(sniffing, ensure_ascii=False)))
+con.commit(); con.close(); print("ok")
+PY
+    [[ $? -eq 0 ]] || { msg_err "Failed to insert Telegram WEB-proxy inbound."; return 1; }
+    msg_ok "Inbound Telegram WEB-proxy created (SNI ${webproxy_domain} → 127.0.0.1:11443)."
 }
 
 insert_hy2_inbound() {
@@ -631,11 +824,20 @@ PY
 install_shareonly_client_sync() {
     [[ ! -f $XUIDB ]] && return 0
     sqlite3 "$XUIDB" <<'SQL'
+UPDATE inbounds
+SET settings = json_set(
+  CASE WHEN json_valid(settings) THEN settings ELSE '{}' END,
+  '$.clients',
+  CASE WHEN json_type(json_extract(settings, '$.clients')) = 'array'
+       THEN json_extract(settings, '$.clients')
+       ELSE json('[]') END
+)
+WHERE protocol IN ('qwdtt','csqtt','tproxy');
 DROP TRIGGER IF EXISTS lucx_shareonly_clients_ins;
 DROP TRIGGER IF EXISTS lucx_shareonly_clients_del;
 CREATE TRIGGER lucx_shareonly_clients_ins
 AFTER INSERT ON client_inbounds
-WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = NEW.inbound_id AND protocol IN ('qwdtt','csqtt'))
+WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = NEW.inbound_id AND protocol IN ('qwdtt','csqtt','tproxy'))
 BEGIN
   UPDATE inbounds SET settings = json_insert(
     json_set(
@@ -664,7 +866,7 @@ BEGIN
 END;
 CREATE TRIGGER lucx_shareonly_clients_del
 AFTER DELETE ON client_inbounds
-WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = OLD.inbound_id AND protocol IN ('qwdtt','csqtt'))
+WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = OLD.inbound_id AND protocol IN ('qwdtt','csqtt','tproxy'))
 BEGIN
   UPDATE inbounds SET settings = json_set(
     settings,
@@ -686,7 +888,7 @@ SQL
 }
 
 insert_extra_inbound() {
-    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" ]] || return 0
+    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" || "${DEPLOY_TPROXY}" == "1" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add extra inbound."; return 1; }
     [[ -z "${IP4:-}" ]] && get_server_ip
     local proto remark port listen_addr sub_host pass web_pass
@@ -762,6 +964,7 @@ PY
     if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
         _insert_one_extra csqtt CSQTT 46000 '0.0.0.0:46000' "${IP4}" || return 1
     fi
+    insert_tproxy_inbound || return 1
     install_shareonly_client_sync
 }
 
@@ -976,13 +1179,13 @@ uninstall_xui() {
     systemctl disable x-ui nginx mtr-backend AdGuardHome 2>/dev/null || true
     pkill -f 'mtg-linux-' >/dev/null 2>&1 || true
     crontab -l 2>/dev/null | grep -vE 'certbot|x-ui|cloudflareips|nginx -s reload|update-geodata' | crontab - || true
-    rm -rf /etc/x-ui/ /usr/local/x-ui/ /usr/local/lib/3x-ui-pro/ /root/cert/ /opt/AdGuardHome /root/.lucx-adguard-info /var/www/diagnostics
+    rm -rf /etc/x-ui/ /usr/local/x-ui/ /usr/local/lib/3x-ui-pro/ /root/cert/ /opt/AdGuardHome /root/.lucx-adguard-info /var/www/diagnostics /var/www/tproxy
     rm -f /usr/bin/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/mtr-backend.service /etc/default/x-ui /etc/nginx/snippets/adguard.conf
     $Pak -y remove nginx nginx-common nginx-core nginx-full python3-certbot-nginx
     $Pak -y purge  nginx nginx-common nginx-core nginx-full python3-certbot-nginx
     $Pak -y autoremove
     $Pak -y autoclean
-    rm -rf /var/www/html/ /var/www/diagnostics/ /var/www/subpage/ /etc/nginx/ /usr/share/nginx/
+    rm -rf /var/www/html/ /var/www/diagnostics/ /var/www/subpage/ /var/www/tproxy/ /etc/nginx/ /usr/share/nginx/
     systemctl daemon-reload 2>/dev/null || true
 }
 
@@ -998,44 +1201,76 @@ IP4_REGEX="^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"
 IP6_REGEX="([a-f0-9:]+:+)+[a-f0-9]+"
 
 get_server_ip() {
-    IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
-    IP6=$(ip route get 2620:fe::fe 2>&1 | grep -Po -- 'src \K\S*')
-    [[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com | tr -d '[:space:]')
-    [[ $IP6 =~ $IP6_REGEX ]] || IP6=$(curl -s ipv6.icanhazip.com | tr -d '[:space:]')
+    local pub
+    IP4=$(timeout 3 ip -4 route get 8.8.8.8 2>/dev/null | grep -Po -- 'src \K\S*' | head -1)
+    pub=$(curl -4 -fsS --connect-timeout 3 --max-time 8 ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]')
+    if [[ $pub =~ $IP4_REGEX ]]; then
+        IP4="$pub"
+    fi
+    IP6=""
+    if timeout 1 ip -6 route show default >/dev/null 2>&1; then
+        IP6=$(timeout 2 ip -6 route get 2620:fe::fe 2>/dev/null | grep -Po -- 'src \K\S*' | head -1)
+        [[ $IP6 =~ $IP6_REGEX ]] || IP6=$(curl -6 -fsS --connect-timeout 2 --max-time 5 ipv6.icanhazip.com 2>/dev/null | tr -d '[:space:]')
+    fi
 }
 
 # Early IP fetch for auto-domain
-IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
-[[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com | tr -d '[:space:]')
+IP4=$(timeout 3 ip -4 route get 8.8.8.8 2>/dev/null | grep -Po -- 'src \K\S*' | head -1)
+pub=$(curl -4 -fsS --connect-timeout 3 --max-time 8 ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]')
+if [[ $pub =~ $IP4_REGEX ]]; then IP4="$pub"; fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DOMAIN VALIDATION
 # ─────────────────────────────────────────────────────────────────────────────
 validate_domains() {
-    while true; do
-        [[ -n "$domain" ]] && break
-        echo -en "Enter available subdomain (sub.domain.tld): " && read -r domain
-    done
-    domain=$(echo "$domain" | tr -d '[:space:]')
+    get_server_ip
+    if [[ ! $IP4 =~ $IP4_REGEX ]]; then
+        msg_err "Не удалось определить IPv4 сервера."
+        exit 1
+    fi
+    local d p
+    domain=$(echo "${domain}" | LC_ALL=C tr -d '[:space:]' | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    if [[ -n "$domain" ]] && ! domain_a_ok "$domain"; then
+        msg_err "A-запись ${domain} не указывает на ${IP4}."
+        domain=""
+    fi
+    if [[ -z "$domain" ]]; then
+        printf -v p 'Домен панели (создайте A-запись на IP "%s"): ' "$IP4"
+        domain=$(prompt_domain_a_record "$p")
+    fi
     SubDomain=$(echo "$domain"   | sed 's/^[^ ]* \|\..*//g')
     MainDomain=$(echo "$domain"  | sed 's/.*\.\([^.]*\..*\)$/\1/')
     [[ "${SubDomain}.${MainDomain}" != "${domain}" ]] && MainDomain=${domain}
-
-    while true; do
-        [[ -n "$reality_domain" ]] && break
-        echo -en "Enter available subdomain for REALITY (sub.domain.tld): " && read -r reality_domain
-    done
-    reality_domain=$(echo "$reality_domain" | tr -d '[:space:]')
+    reality_domain=$(echo "${reality_domain}" | LC_ALL=C tr -d '[:space:]' | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    if [[ -n "$reality_domain" ]] && ! domain_a_ok "$reality_domain"; then
+        msg_err "A-запись ${reality_domain} не указывает на ${IP4}."
+        reality_domain=""
+    fi
+    if [[ -z "$reality_domain" ]]; then
+        while true; do
+            printf -v p 'Домен для Reality (создайте A-запись на IP "%s"): ' "$IP4"
+            d=$(prompt_domain_a_record "$p")
+            if [[ "$d" == "$domain" ]]; then
+                ui_err "Домен панели и Reality должны отличаться."
+                continue
+            fi
+            reality_domain="$d"
+            break
+        done
+    fi
     RealitySubDomain=$(echo "$reality_domain" | sed 's/^[^ ]* \|\..*//g')
     RealityMainDomain=$(echo "$reality_domain" | sed 's/.*\.\([^.]*\..*\)$/\1/')
     [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] && RealityMainDomain=${reality_domain}
-
     if [[ "$domain" == "$reality_domain" ]]; then
         msg_err "Panel domain and REALITY domain must be different! Got: ${domain}"
         exit 1
     fi
 }
+# First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
+if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" ]]; then
+    validate_domains
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INSTALL PACKAGES
@@ -1064,11 +1299,10 @@ get_ssl_certs() {
     fuser -k 80/tcp 80/udp 443/tcp 443/udp 2>/dev/null || true
 
     if [[ ${AUTODOMAIN} == *"y"* ]]; then
-        local resolve_ok=true
-        for d in "$domain" "$reality_domain"; do
-            local a
-            a=$(getent ahostsv4 "$d" 2>/dev/null | awk 'NR==1{print $1}')
-            if [[ "$a" != "$IP4" ]]; then
+        local resolve_ok=true extra_d=()
+        [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]] && extra_d+=("$webproxy_domain")
+        for d in "$domain" "$reality_domain" "${extra_d[@]}"; do
+            if ! domain_a_ok "$d"; then
                 msg_err "Auto-domain $d does not resolve to $IP4. Fix DNS and retry."
                 resolve_ok=false
             fi
@@ -1094,6 +1328,18 @@ get_ssl_certs() {
     chmod 755 /root/cert/*
     ln -sf /etc/letsencrypt/live/${domain}/fullchain.pem /root/cert/${domain}/fullchain.pem
     ln -sf /etc/letsencrypt/live/${domain}/privkey.pem   /root/cert/${domain}/privkey.pem
+
+    if [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]]; then
+        certbot certonly --standalone --non-interactive --agree-tos \
+            --register-unsafely-without-email -d "$webproxy_domain"
+        if [[ ! -d "/etc/letsencrypt/live/${webproxy_domain}/" ]]; then
+            systemctl start nginx >/dev/null 2>&1
+            msg_err "$webproxy_domain SSL could not be generated! Check Domain/IP." && exit 1
+        fi
+        mkdir -p /root/cert/${webproxy_domain}
+        ln -sf /etc/letsencrypt/live/${webproxy_domain}/fullchain.pem /root/cert/${webproxy_domain}/fullchain.pem
+        ln -sf /etc/letsencrypt/live/${webproxy_domain}/privkey.pem   /root/cert/${webproxy_domain}/privkey.pem
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1112,17 +1358,24 @@ configure_nginx() {
         http2_listen=" http2"
     fi
 
-    # SNI-based stream: reality → 8443, domain → 7443
+    # SNI-based stream: reality → 8443, domain → 7443, webproxy → 11443
+    local tproxy_sni="" tproxy_up=""
+    if [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]]; then
+        tproxy_sni="    ${webproxy_domain}    tproxy;"
+        tproxy_up="upstream tproxy { server 127.0.0.1:11443; }"
+    fi
     cat > /etc/nginx/stream-enabled/stream.conf <<EOF
 map \$ssl_preread_server_name \$sni_name {
     hostnames;
     ${reality_domain}    xray;
     ${domain}            www;
+${tproxy_sni}
     default              xray;
 }
 
 upstream xray { server 127.0.0.1:8443; }
 upstream www  { server 127.0.0.1:7443; }
+${tproxy_up}
 
 server {
     proxy_protocol on;
@@ -1143,10 +1396,12 @@ EOF
     sed -i "/worker_connections/c\worker_connections 4096;" /etc/nginx/nginx.conf
 
     # HTTP → HTTPS redirect
+    local wp_http_names=""
+    [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]] && wp_http_names=" ${webproxy_domain}"
     cat > /etc/nginx/sites-available/80.conf <<EOF
 server {
     listen 80;
-    server_name ${domain} ${reality_domain};
+    server_name ${domain} ${reality_domain}${wp_http_names};
     return 301 https://\$host\$request_uri;
 }
 EOF
@@ -1458,8 +1713,9 @@ configure_xui_db() {
     [[ -z "$emoji_flag" || "$emoji_flag" == "null" ]] && emoji_flag="🌐"
     EMOJI_FLAG="$emoji_flag"
 
-    local sub_uri="https://${domain}/${sub_path}/"
-    local json_uri="https://${domain}/${json_path}?name="
+    local HP='http'; HP="${HP}s://${domain}"
+    local sub_uri="${HP}/${sub_path}/"
+    local json_uri="${HP}/${json_path}?name="
 
     # Prepare short IDs for REALITY
     local shor
@@ -1734,11 +1990,18 @@ show_results() {
     if systemctl is-active --quiet x-ui; then
         printf '0\n' | x-ui | grep --color=never -i ':'
         msg_inf "────────────────────────────────────────────────────────────────────────────────"
-        msg_inf "X-UI Secure Panel: https://${domain}/${panel_path}/\n"
+        HP='http'; HP="${HP}s://${domain}/${panel_path}/"
+        msg_inf "X-UI Secure Panel: ${HP}\n"
         echo -e "Username:  ${config_username}\n"
         echo -e "Password:  ${config_password}\n"
         msg_inf "────────────────────────────────────────────────────────────────────────────────"
         print_adguard_results
+        if [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" && -n "${TPROXY_SECRET}" ]]; then
+            H='http'; H="${H}s://"
+            msg_inf "Telegram WEB-proxy:"
+            echo "${H}t.me/webproxy?server=${webproxy_domain}&secret=${TPROXY_SECRET}"
+            echo
+        fi
         msg_inf "Please save this screen!"
     else
         nginx -t
@@ -1754,7 +2017,7 @@ main() {
     choose_adguard
     choose_xray_dns
     choose_extra_inbounds
-    validate_domains
+    choose_webproxy_domain
     clean_previous_install
     install_packages
     get_server_ip
@@ -1771,6 +2034,7 @@ main() {
     fi
     configure_xui_db
     install_fake_site
+    install_tproxy_site
     tune_system
     setup_cron
     setup_firewall
