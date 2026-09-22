@@ -21,6 +21,7 @@ BACKUP_PATHS=(
     /var/www/html
     /var/www/diagnostics
     /var/www/subpage
+    /var/www/tproxy
     /etc/ufw/user.rules
     /etc/ufw/user6.rules
     /opt/AdGuardHome
@@ -172,6 +173,7 @@ cmd_restore() {
     chown -R www-data:www-data /var/www/html        2>/dev/null || true
     chown -R www-data:www-data /var/www/diagnostics 2>/dev/null || true
     chown -R www-data:www-data /var/www/subpage     2>/dev/null || true
+    chown -R www-data:www-data /var/www/tproxy      2>/dev/null || true
     [[ -f /usr/local/x-ui/x-ui ]] && chmod +x /usr/local/x-ui/x-ui
     [[ -f /usr/bin/x-ui ]]        && chmod +x /usr/bin/x-ui
     find /usr/local/lib/3x-ui-pro -name "*.py" -exec chmod +x {} \; 2>/dev/null || true
@@ -291,7 +293,7 @@ What is backed up:
   /usr/local/lib/3x-ui-pro        optional helper scripts
   /etc/letsencrypt                SSL certificates
   /root/cert                      panel cert symlinks
-  /var/www/{html,diagnostics,subpage}  web content
+  /var/www/{html,diagnostics,subpage,tproxy}  web content
   /opt/AdGuardHome                self-hosted DoH (if installed)
   /etc/systemd/system/{x-ui,mtr-backend,AdGuardHome}.service
   /etc/ufw/user*.rules            firewall rules
