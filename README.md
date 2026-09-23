@@ -5,7 +5,7 @@
 - Debian 12,13 / Ubuntu 24,26
 - Два домена или поддомена (для панели/DNS и для REALITY)
 - Автоматическое обновление SSL-сертификатов
-- Поддержка VLESS TCP REALITY, VLESS XHTTP TLS — через порт 443, а так же Hysteria 2, qWDTT и CSQTT
+- Поддержка VLESS TCP REALITY, VLESS XHTTP TLS, Telegram WEB-proxy — через порт 443, а так же Hysteria 2, qWDTT и CSQTT
 
 ---
 
@@ -28,7 +28,7 @@
 
 ```bash
 wget -qO lucx-ui-latest.sh https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh
-bash lucx-ui-latest.sh -install y -subdomain panel.example.com -reality_domain r.example.com
+bash lucx-ui-latest.sh -install y
 ```
 
 1. panel.example.com - домен панели
