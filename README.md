@@ -56,12 +56,30 @@ bash lucx-ui-latest.sh -uninstall y
 bash lucx-ui-latest.sh -adguard y
 ```
 
-Повторный запуск безопасен (настройки и пароль сохраняются). После установщика или патча запустите скрипт ещё раз — они перезаписывают конфиг nginx.
+Повторный запуск безопасен (настройки и пароль сохраняются), он просто перезаписывает nginx.
 
 Удаление:
 
 ```bash
 bash lucx-ui-latest.sh -adguard-uninstall y
+```
+
+---
+
+## rkn-guard (опционально; поверх панели)
+
+Устанавливает [rkn-guard](https://github.com/Flecksis/rkn-guard) для защиты от сканеров и сетевого шума, настраивает автообновление программы и баз IP-адресов сканеров.
+
+```bash
+bash lucx-ui-latest.sh -rkn-guard y
+```
+
+Повторный запуск безопасен - просто переустановит программу.
+
+Удаление:
+
+```bash
+bash lucx-ui-latest.sh -rkn-guard-uninstall y
 ```
 
 ---
