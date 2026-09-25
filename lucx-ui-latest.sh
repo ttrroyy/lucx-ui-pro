@@ -1110,6 +1110,10 @@ EOF
 
 install_rkn_guard() {
     local installer
+    if command -v rkn-guard >/dev/null 2>&1; then
+        msg_inf "rkn-guard уже установлен — сначала выполняется полное удаление."
+        uninstall_rkn_guard || return 1
+    fi
     command -v curl >/dev/null 2>&1 || {
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl ca-certificates
