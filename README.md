@@ -1,6 +1,6 @@
 # lucx-ui-pro
 
-Автоматическая установка панели [lucx-ui](https://github.com/AlexeyLCP/lucx-ui) с nginx, SSL, автосозданием инбаундов, self-hosted DoH и настройкой DNS в xray.
+Автоматическая установка панели [lucx-ui](https://github.com/AlexeyLCP/lucx-ui) с nginx, SSL, автосозданием инбаундов, self-hosted DoH, защитой от сканеров и настройкой DNS в xray.
 
 - Debian 12,13 / Ubuntu 24,26
 - Два домена или поддомена (для панели/DNS и для REALITY)
