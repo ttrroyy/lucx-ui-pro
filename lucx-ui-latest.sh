@@ -78,6 +78,9 @@ webproxy_domain=""
 TPROXY_SECRET=""
 ADGUARD_ONLY=""
 ADGUARD_UNINSTALL=""
+RKN_GUARD_ONLY=""
+RKN_GUARD_UNINSTALL=""
+DEPLOY_RKN=""
 CUSTOM_DOH_URL=""
 CUSTOM_DOH_HOST=""
 CUSTOM_DOH_IP=""
@@ -153,6 +156,8 @@ while [ "$#" -gt 0 ]; do
         -version)          PANEL_VERSION="$2";     shift 2 ;;
         -adguard)          ADGUARD_ONLY="$2";      shift 2 ;;
         -adguard-uninstall) ADGUARD_UNINSTALL="$2"; shift 2 ;;
+        -rkn-guard)        RKN_GUARD_ONLY="$2";    shift 2 ;;
+        -rkn-guard-uninstall) RKN_GUARD_UNINSTALL="$2"; shift 2 ;;
         -uninstall)        UNINSTALL="$2";         shift 2 ;;
         *)                 shift 1 ;;
     esac
@@ -989,6 +994,167 @@ choose_adguard() {
     done
     echo
 }
+choose_rkn_guard() {
+    local ans mapped tty
+    DEPLOY_RKN=""
+    tty="/dev/tty"
+    [[ -r /dev/tty ]] || tty=""
+    while true; do
+        echo
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        msg_inf 'Установить ли rkn-guard с защитой от сканеров подсетей?'
+        echo '  1) Да'
+        echo '  2) Нет'
+        msg_inf '────────────────────────────────────────────────────────────────────────────────'
+        echo -en 'Выбор [1-2]: '
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+        mapped=$(echo "$ans" | tr -d '[:space:]')
+        case "$mapped" in
+            1) DEPLOY_RKN="1"; break ;;
+            2) DEPLOY_RKN="2"; break ;;
+        esac
+    done
+    echo
+}
+
+install_rkn_guard_auto_updates() {
+    local update_dir="/usr/local/lib/lucx-ui-pro"
+    mkdir -p "$update_dir"
+
+    cat > "${update_dir}/rkn-guard-list-update.sh" <<'RKN_LIST_UPDATE'
+#!/usr/bin/env bash
+set -euo pipefail
+command -v rkn-guard >/dev/null 2>&1 || exit 0
+exec rkn-guard update \
+  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/government_networks.list \
+  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/antiscanner.list \
+  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list
+RKN_LIST_UPDATE
+
+    cat > "${update_dir}/rkn-guard-self-update.sh" <<'RKN_SELF_UPDATE'
+#!/usr/bin/env bash
+set -euo pipefail
+command -v rkn-guard >/dev/null 2>&1 || exit 0
+latest=$(curl -fsSL --connect-timeout 10 --max-time 30 \
+  https://api.github.com/repos/Flecksis/rkn-guard/releases/latest \
+  | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+[[ "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+current=$(rkn-guard build-info 2>/dev/null | head -n1 || true)
+[[ -n "$current" ]] || current=$(rkn-guard --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+if [[ "${current#v}" == "${latest#v}" ]]; then
+  exit 0
+fi
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL --connect-timeout 15 --max-time 180 \
+  https://raw.githubusercontent.com/Flecksis/rkn-guard/master/app%20install.sh -o "$tmp"
+bash "$tmp"
+curl -fsSL --connect-timeout 15 --max-time 60 \
+  https://raw.githubusercontent.com/Flecksis/rkn-guard/master/install.sh \
+  -o /opt/rkn-guard-manager.sh
+chmod 755 /opt/rkn-guard-manager.sh
+printf '%s\n' '#!/usr/bin/env bash' 'exec /opt/rkn-guard-manager.sh "$@"' > /usr/local/bin/rkn
+chmod 755 /usr/local/bin/rkn
+RKN_SELF_UPDATE
+    chmod 755 "${update_dir}/rkn-guard-list-update.sh" "${update_dir}/rkn-guard-self-update.sh"
+
+    cat > /etc/systemd/system/rkn-guard-list-update.service <<EOF
+[Unit]
+Description=Update rkn-guard IP block lists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${update_dir}/rkn-guard-list-update.sh
+EOF
+    cat > /etc/systemd/system/rkn-guard-list-update.timer <<'EOF'
+[Unit]
+Description=Periodic rkn-guard IP list update
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    cat > /etc/systemd/system/rkn-guard-self-update.service <<EOF
+[Unit]
+Description=Update rkn-guard when a new release is available
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${update_dir}/rkn-guard-self-update.sh
+EOF
+    cat > /etc/systemd/system/rkn-guard-self-update.timer <<'EOF'
+[Unit]
+Description=Periodic rkn-guard release check
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=1d
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now rkn-guard-list-update.timer rkn-guard-self-update.timer
+}
+
+install_rkn_guard() {
+    local installer
+    command -v curl >/dev/null 2>&1 || {
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl ca-certificates
+    }
+    installer=$(mktemp)
+    if ! curl -fsSL --connect-timeout 15 --max-time 180 \
+        https://raw.githubusercontent.com/Flecksis/rkn-guard/master/install.sh -o "$installer"; then
+        rm -f "$installer"
+        msg_err "Не удалось скачать установщик rkn-guard."
+        return 1
+    fi
+    if ! bash "$installer" install; then
+        rm -f "$installer"
+        msg_err "Установка rkn-guard завершилась с ошибкой."
+        return 1
+    fi
+    rm -f "$installer"
+    command -v rkn-guard >/dev/null 2>&1 || { msg_err "rkn-guard не найден после установки."; return 1; }
+    install_rkn_guard_auto_updates || return 1
+    msg_ok "rkn-guard установлен; автообновление баз и программы включено."
+}
+
+uninstall_rkn_guard() {
+    local rc=0
+    systemctl disable --now rkn-guard-list-update.timer rkn-guard-self-update.timer 2>/dev/null || true
+    systemctl stop rkn-guard-list-update.service rkn-guard-self-update.service 2>/dev/null || true
+    rm -f /etc/systemd/system/rkn-guard-list-update.service \
+          /etc/systemd/system/rkn-guard-list-update.timer \
+          /etc/systemd/system/rkn-guard-self-update.service \
+          /etc/systemd/system/rkn-guard-self-update.timer
+    rm -f /usr/local/lib/lucx-ui-pro/rkn-guard-list-update.sh \
+          /usr/local/lib/lucx-ui-pro/rkn-guard-self-update.sh
+    if command -v rkn-guard >/dev/null 2>&1; then
+        rkn-guard uninstall --yes || rc=$?
+    fi
+    rm -f /usr/local/bin/rkn /opt/rkn-guard-manager.sh /opt/rkn-guard-manual.list
+    systemctl daemon-reload
+    systemctl reset-failed rkn-guard-list-update.service rkn-guard-self-update.service 2>/dev/null || true
+    if [[ $rc -ne 0 ]]; then
+        msg_err "rkn-guard удалён не полностью (код ${rc}); проверьте правила iptables/ipset."
+        return "$rc"
+    fi
+    msg_ok "rkn-guard удалён. x-ui, nginx и AdGuard Home не затронуты."
+}
+
 uninstall_adguard() {
     systemctl stop AdGuardHome 2>/dev/null || true
     [[ -x /opt/AdGuardHome/AdGuardHome ]] && /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
@@ -1268,7 +1434,7 @@ validate_domains() {
     fi
 }
 # First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
-if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" ]]; then
+if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" ]]; then
     validate_domains
 fi
 
@@ -2015,6 +2181,7 @@ show_results() {
 # ─────────────────────────────────────────────────────────────────────────────
 main() {
     choose_adguard
+    choose_rkn_guard
     choose_xray_dns
     choose_extra_inbounds
     choose_webproxy_domain
@@ -2038,6 +2205,9 @@ main() {
     tune_system
     setup_cron
     setup_firewall
+    if [[ "${DEPLOY_RKN}" == "1" ]]; then
+        install_rkn_guard
+    fi
 
     if ! systemctl is-enabled --quiet x-ui; then
         systemctl daemon-reload && systemctl enable x-ui.service
@@ -2052,6 +2222,14 @@ main() {
     show_results
 }
 
+if [[ "${RKN_GUARD_UNINSTALL}" == "y" ]]; then
+    uninstall_rkn_guard
+    exit $?
+fi
+if [[ "${RKN_GUARD_ONLY}" == "y" ]]; then
+    install_rkn_guard
+    exit $?
+fi
 if [[ "${ADGUARD_UNINSTALL}" == "y" ]]; then
     uninstall_adguard
     exit 0
