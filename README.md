@@ -74,7 +74,7 @@ bash lucx-ui-latest.sh -adguard-uninstall y
 bash lucx-ui-latest.sh -rkn-guard y
 ```
 
-Повторный запуск безопасен - просто переустановит программу.
+Повторный запуск переустановит программу.
 
 Удаление:
 
