@@ -84,6 +84,24 @@ bash lucx-ui-latest.sh -rkn-guard-uninstall y
 
 ---
 
+## Telegram WEB-proxy (опционально; поверх панели)
+
+Устанавливает [telegram web-proxy](https://github.com/telegramdesktop/tproxy-server) в панель, выдает ссылку для подключения.
+
+```bash
+bash lucx-ui-latest.sh -tg-web-proxy y
+```
+
+Повторный запуск переустановит Telegram WEB-proxy и выдаст новую ссылку для подключения.
+
+Удаление:
+
+```bash
+bash lucx-ui-latest.sh -tg-web-proxy-uninstall y
+```
+
+---
+
 ## Параметры запуска
 
 | Параметр | Описание |
