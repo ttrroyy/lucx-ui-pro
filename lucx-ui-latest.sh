@@ -80,6 +80,8 @@ ADGUARD_ONLY=""
 ADGUARD_UNINSTALL=""
 RKN_GUARD_ONLY=""
 RKN_GUARD_UNINSTALL=""
+TG_WEB_PROXY_ONLY=""
+TG_WEB_PROXY_UNINSTALL=""
 DEPLOY_RKN=""
 CUSTOM_DOH_URL=""
 CUSTOM_DOH_HOST=""
@@ -158,6 +160,8 @@ while [ "$#" -gt 0 ]; do
         -adguard-uninstall) ADGUARD_UNINSTALL="$2"; shift 2 ;;
         -rkn-guard)        RKN_GUARD_ONLY="$2";    shift 2 ;;
         -rkn-guard-uninstall) RKN_GUARD_UNINSTALL="$2"; shift 2 ;;
+        -tg-web-proxy)     TG_WEB_PROXY_ONLY="$2"; shift 2 ;;
+        -tg-web-proxy-uninstall) TG_WEB_PROXY_UNINSTALL="$2"; shift 2 ;;
         -uninstall)        UNINSTALL="$2";         shift 2 ;;
         *)                 shift 1 ;;
     esac
@@ -731,7 +735,230 @@ cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, exp
 con.commit(); con.close(); print("ok")
 PY
     [[ $? -eq 0 ]] || { msg_err "Failed to insert Telegram WEB-proxy inbound."; return 1; }
+    umask 077
+    cat > /root/.lucx-tg-web-proxy-info <<EOF
+TG_WEB_PROXY_DOMAIN=${webproxy_domain}
+TG_WEB_PROXY_SECRET=${secret}
+EOF
+    chmod 600 /root/.lucx-tg-web-proxy-info
     msg_ok "Inbound Telegram WEB-proxy created (SNI ${webproxy_domain} → 127.0.0.1:11443)."
+}
+
+get_installed_tproxy_domain() {
+    local found=""
+    if [[ -f "$XUIDB" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        found=$(python3 - "$XUIDB" <<'PY_TG_DOMAIN'
+import json, sqlite3, sys
+try:
+    con = sqlite3.connect(sys.argv[1], timeout=10)
+    row = con.execute("SELECT settings FROM inbounds WHERE protocol='tproxy' OR tag='inbound-tproxy' LIMIT 1").fetchone()
+    con.close()
+    if row:
+        value = json.loads(row[0] or "{}")
+        print(value.get("hostname", ""))
+except Exception:
+    pass
+PY_TG_DOMAIN
+)
+    fi
+    if [[ -z "$found" && -f /root/.lucx-tg-web-proxy-info ]]; then
+        found=$(sed -n 's/^TG_WEB_PROXY_DOMAIN=//p' /root/.lucx-tg-web-proxy-info | head -n1)
+    fi
+    if [[ -z "$found" && -f /etc/nginx/stream-enabled/stream.conf ]]; then
+        found=$(awk '$2 == "tproxy;" {print $1; exit}' /etc/nginx/stream-enabled/stream.conf)
+    fi
+    printf '%s' "$found"
+}
+
+discover_panel_domains() {
+    local stream=/etc/nginx/stream-enabled/stream.conf
+    [[ -f "$stream" ]] || return 0
+    [[ -n "${domain:-}" ]] || domain=$(awk '$2 == "www;" {print $1; exit}' "$stream")
+    [[ -n "${reality_domain:-}" ]] || reality_domain=$(awk '$2 == "xray;" && $1 != "default" {print $1; exit}' "$stream")
+}
+
+patch_tproxy_nginx() {
+    local action="$1" proxy_domain="$2"
+    local stream=/etc/nginx/stream-enabled/stream.conf redirect=/etc/nginx/sites-available/80.conf
+    [[ -f "$stream" && -f "$redirect" ]] || { msg_err "Конфигурация nginx панели не найдена."; return 1; }
+    local stream_bak redirect_bak
+    stream_bak=$(mktemp); redirect_bak=$(mktemp)
+    cp -a "$stream" "$stream_bak"; cp -a "$redirect" "$redirect_bak"
+    if ! python3 - "$action" "$proxy_domain" "$stream" "$redirect" <<'PY_TG_NGINX'
+import re, sys
+from pathlib import Path
+action, domain, stream_path, redirect_path = sys.argv[1:5]
+stream_file, redirect_file = Path(stream_path), Path(redirect_path)
+stream = stream_file.read_text()
+lines = stream.splitlines()
+# Remove any previous LucX tproxy map entry and one-line upstream first.
+lines = [line for line in lines if not re.match(r'^\s*\S+\s+tproxy;\s*$', line)]
+lines = [line for line in lines if not re.match(r'^\s*upstream\s+tproxy\s*\{[^}]*\}\s*$', line)]
+if action == 'install':
+    inserted = False
+    for i, line in enumerate(lines):
+        if re.match(r'^\s*default\s+', line):
+            indent = re.match(r'^(\s*)', line).group(1)
+            lines.insert(i, f'{indent}{domain}    tproxy;')
+            inserted = True
+            break
+    if not inserted:
+        raise SystemExit('SNI map default entry not found')
+    for i, line in enumerate(lines):
+        if re.match(r'^\s*server\s*\{\s*$', line):
+            lines.insert(i, f'upstream tproxy {{ server 127.0.0.1:11443; }}')
+            lines.insert(i + 1, '')
+            break
+    else:
+        raise SystemExit('stream server block not found')
+stream_file.write_text('\n'.join(lines) + '\n')
+
+redirect = redirect_file.read_text().splitlines()
+changed = False
+for i, line in enumerate(redirect):
+    m = re.match(r'^(\s*server_name\s+)(.*?)(;\s*)$', line)
+    if not m:
+        continue
+    names = [x for x in m.group(2).split() if x != domain]
+    if action == 'install' and domain not in names:
+        names.append(domain)
+    redirect[i] = m.group(1) + ' '.join(names) + m.group(3)
+    changed = True
+    break
+if not changed:
+    raise SystemExit('redirect server_name not found')
+redirect_file.write_text('\n'.join(redirect) + '\n')
+PY_TG_NGINX
+    then
+        cp -a "$stream_bak" "$stream"; cp -a "$redirect_bak" "$redirect"
+        rm -f "$stream_bak" "$redirect_bak"
+        msg_err "Не удалось изменить конфигурацию nginx."
+        return 1
+    fi
+    if ! nginx -t >/dev/null 2>&1; then
+        cp -a "$stream_bak" "$stream"; cp -a "$redirect_bak" "$redirect"
+        rm -f "$stream_bak" "$redirect_bak"
+        nginx -t
+        msg_err "Проверка nginx не пройдена; исходные файлы восстановлены."
+        return 1
+    fi
+    rm -f "$stream_bak" "$redirect_bak"
+    systemctl reload nginx
+}
+
+remove_tproxy_inbound() {
+    [[ -f "$XUIDB" ]] || return 0
+    python3 - "$XUIDB" <<'PY_TG_DELETE'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1], timeout=30)
+cur = con.cursor()
+ids = [r[0] for r in cur.execute("SELECT id FROM inbounds WHERE protocol='tproxy' OR tag='inbound-tproxy'")]
+def columns(table):
+    try:
+        return {r[1] for r in cur.execute('PRAGMA table_info("%s")' % table)}
+    except Exception:
+        return set()
+for table in ('client_traffics', 'hosts'):
+    cols = columns(table)
+    if 'inbound_id' in cols:
+        for inbound_id in ids:
+            cur.execute('DELETE FROM "%s" WHERE inbound_id=?' % table, (inbound_id,))
+for inbound_id in ids:
+    cur.execute("DELETE FROM inbounds WHERE id=?", (inbound_id,))
+con.commit()
+try:
+    cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+except Exception:
+    pass
+con.close()
+PY_TG_DELETE
+}
+
+ensure_tproxy_certificate() {
+    local d="$1" was_active=0 rc=0
+    if [[ -s "/etc/letsencrypt/live/${d}/fullchain.pem" && -s "/etc/letsencrypt/live/${d}/privkey.pem" ]]; then
+        :
+    else
+        systemctl is-active --quiet nginx && was_active=1
+        systemctl stop nginx 2>/dev/null || true
+        certbot certonly --standalone --non-interactive --agree-tos             --register-unsafely-without-email -d "$d" || rc=$?
+        [[ $was_active -eq 1 ]] && systemctl start nginx 2>/dev/null || true
+        [[ $rc -eq 0 ]] || return "$rc"
+    fi
+    mkdir -p "/root/cert/${d}"
+    chmod 755 /root/cert /root/cert/* 2>/dev/null || true
+    ln -sf "/etc/letsencrypt/live/${d}/fullchain.pem" "/root/cert/${d}/fullchain.pem"
+    ln -sf "/etc/letsencrypt/live/${d}/privkey.pem" "/root/cert/${d}/privkey.pem"
+}
+
+uninstall_tg_web_proxy() {
+    local keep_cert="${1:-0}" proxy_domain had_proxy=0
+    proxy_domain=$(get_installed_tproxy_domain)
+    if [[ -n "$proxy_domain" ]] || [[ -d /var/www/tproxy ]]; then had_proxy=1; fi
+    if [[ -n "$proxy_domain" ]]; then
+        patch_tproxy_nginx uninstall "$proxy_domain" || return 1
+    fi
+    remove_tproxy_inbound || return 1
+    rm -rf /var/www/tproxy
+    rm -f /root/.lucx-tg-web-proxy-info
+    if [[ -n "$proxy_domain" && "$keep_cert" != "1" ]]; then
+        rm -rf "/root/cert/${proxy_domain}"
+        if command -v certbot >/dev/null 2>&1 && [[ -f "/etc/letsencrypt/renewal/${proxy_domain}.conf" ]]; then
+            certbot delete --non-interactive --cert-name "$proxy_domain" >/dev/null 2>&1 || true
+        fi
+    fi
+    if [[ $had_proxy -eq 1 ]] && systemctl is-active --quiet x-ui; then
+        x-ui restart >/dev/null 2>&1 || systemctl restart x-ui
+    fi
+    msg_ok "Telegram WEB-proxy удалён. Остальные инбаунды, nginx и AdGuard Home сохранены."
+}
+
+install_tg_web_proxy() {
+    local previous_domain arch
+    arch=$(uname -m)
+    [[ "$arch" == "x86_64" ]] || { msg_err "Telegram WEB-proxy доступен только на x86_64 (MTProxy)."; return 1; }
+    [[ -f "$XUIDB" ]] || { msg_err "x-ui.db не найден — сначала установите панель."; return 1; }
+    for cmd in nginx certbot sqlite3 python3 curl jq openssl; do
+        command -v "$cmd" >/dev/null 2>&1 || { msg_err "Не найдена обязательная команда: ${cmd}"; return 1; }
+    done
+    previous_domain=$(get_installed_tproxy_domain)
+    if [[ -n "$previous_domain" ]] || [[ -d /var/www/tproxy ]]; then
+        msg_inf "Telegram WEB-proxy уже установлен — выполняется чистая переустановка."
+        uninstall_tg_web_proxy 1 || return 1
+    fi
+    get_server_ip
+    [[ "$IP4" =~ $IP4_REGEX ]] || { msg_err "Не удалось определить IPv4 сервера."; return 1; }
+    discover_panel_domains
+    DEPLOY_TPROXY="1"
+    if [[ -n "$previous_domain" ]] && domain_a_ok "$previous_domain"; then
+        webproxy_domain="$previous_domain"
+    else
+        choose_webproxy_domain
+    fi
+    ensure_tproxy_certificate "$webproxy_domain" || { msg_err "Не удалось получить сертификат для ${webproxy_domain}."; return 1; }
+    install_tproxy_site || return 1
+    patch_tproxy_nginx install "$webproxy_domain" || return 1
+    if ! insert_tproxy_inbound; then
+        patch_tproxy_nginx uninstall "$webproxy_domain" 2>/dev/null || true
+        rm -rf /var/www/tproxy /root/.lucx-tg-web-proxy-info
+        return 1
+    fi
+    install_shareonly_client_sync || {
+        remove_tproxy_inbound 2>/dev/null || true
+        patch_tproxy_nginx uninstall "$webproxy_domain" 2>/dev/null || true
+        rm -rf /var/www/tproxy /root/.lucx-tg-web-proxy-info
+        return 1
+    }
+    if systemctl is-active --quiet x-ui; then
+        x-ui restart >/dev/null 2>&1 || systemctl restart x-ui
+    else
+        systemctl start x-ui
+    fi
+    echo
+    msg_inf '────────────────────────────────────────────────────────────────────────────────'
+    local H='http'; H="${H}s://"
+    echo "Telegram WEB-proxy: ${H}t.me/webproxy?server=${webproxy_domain}&secret=${TPROXY_SECRET}"
+    msg_inf '────────────────────────────────────────────────────────────────────────────────'
 }
 
 insert_hy2_inbound() {
@@ -1438,7 +1665,7 @@ validate_domains() {
     fi
 }
 # First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
-if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" ]]; then
+if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
     validate_domains
 fi
 
@@ -2226,6 +2453,14 @@ main() {
     show_results
 }
 
+if [[ "${TG_WEB_PROXY_UNINSTALL}" == "y" ]]; then
+    uninstall_tg_web_proxy
+    exit $?
+fi
+if [[ "${TG_WEB_PROXY_ONLY}" == "y" ]]; then
+    install_tg_web_proxy
+    exit $?
+fi
 if [[ "${RKN_GUARD_UNINSTALL}" == "y" ]]; then
     uninstall_rkn_guard
     exit $?
