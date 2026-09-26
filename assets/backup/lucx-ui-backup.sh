@@ -7,7 +7,7 @@
 set -Eeuo pipefail
 
 BACKUP_STORE="/var/backups/x-ui"
-PACKAGES="nginx-full certbot python3 sqlite3 curl wget jq ufw mtr-tiny"
+PACKAGES="nginx-full certbot python3 sqlite3 curl wget jq ufw mtr-tiny ipset iptables-persistent rsyslog whois"
 
 # ── paths to back up ──────────────────────────────────────────────────────────
 BACKUP_PATHS=(
@@ -22,12 +22,29 @@ BACKUP_PATHS=(
     /var/www/diagnostics
     /var/www/subpage
     /var/www/tproxy
+    /root/.lucx-tg-web-proxy-info
     /etc/ufw/user.rules
     /etc/ufw/user6.rules
+    /etc/ufw/before.rules
+    /etc/ufw/before6.rules
+    /etc/ipset.conf
+    /etc/iptables/ipsets
+    /etc/rsyslog.d/10-iptables-scanners.conf
+    /etc/logrotate.d/iptables-scanners
+    /usr/local/bin/rkn-guard
+    /usr/local/bin/rkn
+    /opt/rkn-guard-manager.sh
+    /opt/rkn-guard-manual.list
     /opt/AdGuardHome
     /root/.lucx-adguard-info
 )
-SYSTEMD_UNITS=(x-ui.service mtr-backend.service AdGuardHome.service)
+SYSTEMD_UNITS=(
+    x-ui.service mtr-backend.service AdGuardHome.service
+    antiscan-ipset-restore.service antiscan-move-rules.service
+    antiscan-aggregate.service antiscan-aggregate.timer
+    rkn-guard-list-update.service rkn-guard-list-update.timer
+    rkn-guard-self-update.service rkn-guard-self-update.timer
+)
 
 # ── colours ───────────────────────────────────────────────────────────────────
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -176,7 +193,11 @@ cmd_restore() {
     chown -R www-data:www-data /var/www/tproxy      2>/dev/null || true
     [[ -f /usr/local/x-ui/x-ui ]] && chmod +x /usr/local/x-ui/x-ui
     [[ -f /usr/bin/x-ui ]]        && chmod +x /usr/bin/x-ui
+    [[ -f /usr/local/bin/rkn-guard ]] && chmod +x /usr/local/bin/rkn-guard
+    [[ -f /usr/local/bin/rkn ]]       && chmod +x /usr/local/bin/rkn
+    [[ -f /opt/rkn-guard-manager.sh ]] && chmod +x /opt/rkn-guard-manager.sh
     find /usr/local/lib/3x-ui-pro -name "*.py" -exec chmod +x {} \; 2>/dev/null || true
+    find /usr/local/lib/lucx-ui-pro -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
     # ── panel cert symlinks (/root/cert/<domain> → letsencrypt) ──────────
     # Backups made before /root/cert was in BACKUP_PATHS lack the symlinks
@@ -199,6 +220,29 @@ cmd_restore() {
         fi
     fi
 
+    # Recreate Telegram WEB-proxy certificate links from its inbound settings.
+    if [[ -f "${db}" ]] && command -v sqlite3 &>/dev/null; then
+        while IFS= read -r cert_domain; do
+            [[ -n "${cert_domain}" && -d "/etc/letsencrypt/live/${cert_domain}" ]] || continue
+            mkdir -p "/root/cert/${cert_domain}"
+            ln -sf "/etc/letsencrypt/live/${cert_domain}/fullchain.pem" "/root/cert/${cert_domain}/fullchain.pem"
+            ln -sf "/etc/letsencrypt/live/${cert_domain}/privkey.pem"   "/root/cert/${cert_domain}/privkey.pem"
+        done < <(python3 - "${db}" <<'PY_TG_RESTORE'
+import json, sqlite3, sys
+try:
+    con = sqlite3.connect(sys.argv[1], timeout=10)
+    rows = con.execute("SELECT settings FROM inbounds WHERE protocol='tproxy' OR tag='inbound-tproxy'").fetchall()
+    con.close()
+    for (raw,) in rows:
+        host = json.loads(raw or "{}").get("hostname", "")
+        if host:
+            print(host)
+except Exception:
+    pass
+PY_TG_RESTORE
+)
+    fi
+
     # ── recreate mtr-backend system user if missing ───────────────────────
     id mtr-backend &>/dev/null || \
         useradd --system --no-create-home --shell /usr/sbin/nologin mtr-backend
@@ -216,6 +260,19 @@ cmd_restore() {
         systemctl enable "${svc}" 2>/dev/null || true
         systemctl start  "${svc}" 2>/dev/null || true
     done
+
+    # Restore rkn-guard runtime units and LucX automatic-update timers when present.
+    if [[ -x /usr/local/bin/rkn-guard ]]; then
+        for unit in antiscan-ipset-restore.service antiscan-move-rules.service antiscan-aggregate.timer; do
+            [[ -f "/etc/systemd/system/${unit}" ]] || continue
+            systemctl enable "$unit" 2>/dev/null || true
+            systemctl start "$unit" 2>/dev/null || true
+        done
+        for timer in rkn-guard-list-update.timer rkn-guard-self-update.timer; do
+            [[ -f "/etc/systemd/system/${timer}" ]] || continue
+            systemctl enable --now "$timer" 2>/dev/null || true
+        done
+    fi
 
     # nginx: test config before starting
     if nginx -t 2>/dev/null; then
@@ -294,9 +351,11 @@ What is backed up:
   /etc/letsencrypt                SSL certificates
   /root/cert                      panel cert symlinks
   /var/www/{html,diagnostics,subpage,tproxy}  web content
+  Telegram WEB-proxy domain, certificate and inbound (inside x-ui DB)
   /opt/AdGuardHome                self-hosted DoH (if installed)
-  /etc/systemd/system/{x-ui,mtr-backend,AdGuardHome}.service
-  /etc/ufw/user*.rules            firewall rules
+  rkn-guard binary, manager, ipset/UFW state and update timers
+  relevant services and timers from /etc/systemd/system
+  /etc/ufw/{user,before}*.rules   firewall rules
   root crontab + /etc/cron.d/
 EOF
         exit 1
