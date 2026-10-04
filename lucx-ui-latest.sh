@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# Package hooks must not open hidden dialogs or restart services during migration.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=l
+export NEEDRESTART_SUSPEND=1
 [[ $EUID -ne 0 ]] && { echo "Run as root: sudo bash $0"; exit 1; }
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
@@ -738,7 +743,7 @@ update_compatibility() (
         msg_err 'Для проверки нужны python3, curl, flock (util-linux) и timeout (coreutils).'; return 1;
     }
     [[ -s "$XUIDB" && -x /usr/local/x-ui/x-ui ]] || { msg_err 'Панель не установлена.'; return 1; }
-    local stage installed latest target choice script_commit installed_revision
+    local stage installed latest target choice script_commit installed_revision menu_prompt
     _arch >/dev/null || return 1
     stage=$(mktemp -d /var/tmp/lucx-pro-update.XXXXXX) || return 1
     trap 'rm -rf -- "$stage"' EXIT
@@ -791,15 +796,32 @@ PY_PRO_COMMIT
     while true; do
         echo
         msg_err 'Обновление остановит панель и VPN-соединения. Сначала будет создан полный backup.'
-        echo 'CSQTT будет переведён в штатный direct-режим; его трафик обходит Xray DNS/routing.'
-        echo 'UFW allow routed сохраняется; Pro больше не дублирует ip_forward=1.'
-        echo "  1) Обновить панель до $target и исправить совместимость"
-        echo "  2) Исправить совместимость текущей панели $installed без обновления бинарника"
-        echo '  3) Отмена'
-        if [[ -t 0 && -r /dev/tty ]]; then
-            read -r -p 'Выбор [1-3]: ' choice </dev/tty || return 0
+        if [[ "$installed" == "$latest" ]]; then
+            echo "Текущая версия: $installed (latest)"
         else
-            read -r -p 'Выбор [1-3]: ' choice || return 0
+            echo "Текущая версия: $installed"
+        fi
+        if [[ "$installed" == "$target" ]]; then
+            echo "  1) Исправить совместимость текущей панели $installed без обновления бинарника"
+            echo '  2) Отмена'
+            menu_prompt='Выбор [1-2]: '
+        else
+            echo "  1) Обновить панель до $target и исправить совместимость"
+            echo "  2) Исправить совместимость текущей панели $installed без обновления бинарника"
+            echo '  3) Отмена'
+            menu_prompt='Выбор [1-3]: '
+        fi
+        if [[ -t 0 && -r /dev/tty ]]; then
+            read -r -p "$menu_prompt" choice </dev/tty || return 0
+        else
+            read -r -p "$menu_prompt" choice || return 0
+        fi
+        if [[ "$installed" == "$target" ]]; then
+            case "${choice// /}" in
+                1) choice=2 ;;
+                2) choice=3 ;;
+                *) continue ;;
+            esac
         fi
         case "${choice// /}" in
             1) UPDATE_TARGET="$target"; break ;;
@@ -816,6 +838,8 @@ def build(tag):
     if not match:
         raise SystemExit('Unknown installed version; automatic update refused')
     return tuple(int(part) for part in match.groups())
+if build(sys.argv[2]) == build(sys.argv[1]):
+    raise SystemExit('Panel version already installed; choose compatibility repair')
 if build(sys.argv[2]) < build(sys.argv[1]):
     raise SystemExit('Downgrade refused; choose compatibility repair for the current version')
 PY_NO_DOWNGRADE
@@ -2323,13 +2347,17 @@ def verify_state(root, state, before_repair=False):
             if current[section].get(name) != value:
                 # Never log credential values or entire client records.
                 detail = ''
-                if section == 'tables' and name == 'inbounds':
+                if section == 'tables' and name in ('inbounds', 'clients', 'users'):
                     old = {r['id']: r for r in value}
                     new = {r['id']: r for r in current[section].get(name, [])}
                     changes = []
                     for row_id, row in old.items():
                         fields = [k for k, v in row.items() if new.get(row_id, {}).get(k) != v]
                         if fields: changes.append(str(row_id) + ':' + ','.join(fields))
+                    added = sorted(new.keys() - old.keys())
+                    removed = sorted(old.keys() - new.keys())
+                    if added: changes.append('added IDs:' + ','.join(map(str, added)))
+                    if removed: changes.append('removed IDs:' + ','.join(map(str, removed)))
                     detail = ' (' + '; '.join(changes) + ')'
                 raise RuntimeError('Update changed protected ' + section + ': ' + name + detail)
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:

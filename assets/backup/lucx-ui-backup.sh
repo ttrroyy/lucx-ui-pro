@@ -1294,13 +1294,17 @@ def verify_state(root, state, before_repair=False):
             if current[section].get(name) != value:
                 # Never log credential values or entire client records.
                 detail = ''
-                if section == 'tables' and name == 'inbounds':
+                if section == 'tables' and name in ('inbounds', 'clients', 'users'):
                     old = {r['id']: r for r in value}
                     new = {r['id']: r for r in current[section].get(name, [])}
                     changes = []
                     for row_id, row in old.items():
                         fields = [k for k, v in row.items() if new.get(row_id, {}).get(k) != v]
                         if fields: changes.append(str(row_id) + ':' + ','.join(fields))
+                    added = sorted(new.keys() - old.keys())
+                    removed = sorted(old.keys() - new.keys())
+                    if added: changes.append('added IDs:' + ','.join(map(str, added)))
+                    if removed: changes.append('removed IDs:' + ','.join(map(str, removed)))
                     detail = ' (' + '; '.join(changes) + ')'
                 raise RuntimeError('Update changed protected ' + section + ': ' + name + detail)
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
