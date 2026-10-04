@@ -240,6 +240,34 @@ def protected_state(root):
     return {'tables': tables, 'settings': saved_settings, 'files': files}
 
 
+def preserve_client_flow(root, state):
+    """Restore only global flow clobbered by native SyncInbound; reject other loss."""
+    previous = json.loads(state.read_text(encoding='utf-8'))
+    current = protected_state(root)
+    old = {row['id']: row for row in previous['tables']['clients']}
+    new = {row['id']: row for row in current['tables']['clients']}
+    if old.keys() != new.keys():
+        raise RuntimeError('Migration changed client IDs; flow repair refused')
+    changes = []
+    for client_id, row in old.items():
+        fields = [key for key, value in row.items() if new[client_id].get(key) != value]
+        if fields:
+            if fields != ['flow'] or row['flow'] not in ('', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443'):
+                raise RuntimeError('Migration changed protected client fields: ' + ','.join(fields))
+            changes.append((row['flow'], client_id))
+            new[client_id]['flow'] = row['flow']
+    current['tables']['clients'] = sorted(new.values(), key=lambda row: json.dumps(row, sort_keys=True))
+    for section in ('tables', 'settings', 'files'):
+        for name, value in previous[section].items():
+            if current[section].get(name) != value:
+                raise RuntimeError('Migration changed protected ' + section + ': ' + name + '; flow repair refused')
+    if changes:
+        with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db:
+            with db:
+                db.executemany('UPDATE clients SET flow=? WHERE id=?', changes)
+        print('Native migration: preserved global flow for ' + str(len(changes)) + ' client(s).')
+
+
 def verify_state(root, state, before_repair=False):
     previous = json.loads(state.read_text(encoding='utf-8'))
     current = protected_state(root)
@@ -410,7 +438,7 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'capture', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
@@ -422,6 +450,8 @@ def main():
     elif args.action == 'capture':
         args.state.write_text(json.dumps(protected_state(root), ensure_ascii=False), encoding='utf-8')
         args.state.chmod(0o600)
+    elif args.action == 'preserve-flow':
+        preserve_client_flow(root, args.state)
     elif args.action == 'verify':
         verify_state(root, args.state, args.before_repair)
     elif args.action in ('probe', 'prepare-update'):

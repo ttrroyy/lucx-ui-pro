@@ -31,6 +31,21 @@ def database(root):
 
 
 class UpdateCompatibility(unittest.TestCase):
+    def test_native_global_flow_clobber_is_restored_but_other_loss_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with closing(database(root)) as db:
+                db.execute("ALTER TABLE clients ADD COLUMN flow TEXT DEFAULT ''")
+                db.execute("UPDATE clients SET flow='xtls-rprx-vision'"); db.commit()
+                state = root/'state.json'; state.write_text(json.dumps(compat.protected_state(root)))
+                db.execute("UPDATE clients SET flow=''"); db.commit()
+                compat.preserve_client_flow(root,state)
+                compat.verify_state(root,state)
+                db.execute("UPDATE clients SET flow='',sub_id='lost'"); db.commit()
+                with self.assertRaisesRegex(RuntimeError,'protected client fields'):
+                    compat.preserve_client_flow(root,state)
+                self.assertEqual(db.execute('SELECT flow FROM clients').fetchone()[0],'')
+
     def test_real_schema_probe_preserves_live_database(self):
         with tempfile.TemporaryDirectory() as folder:
             with closing(database(Path(folder))) as db:
