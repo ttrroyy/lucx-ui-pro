@@ -31,6 +31,27 @@ def database(root):
 
 
 class UpdateCompatibility(unittest.TestCase):
+    def test_updater_defers_service_start_until_after_migration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'update.sh'
+            path.write_text('XUI_UPDATE_TAG=x\n        systemctl start x-ui > /dev/null 2>&1\n        rc-service x-ui start > /dev/null 2>&1\n    config_after_update\n        bash "${awg_installer}" || true\n')
+            compat.adapt_updater(path)
+            result=path.read_text()
+            self.assertNotIn('systemctl start x-ui',result)
+            self.assertNotIn('rc-service x-ui start',result)
+            self.assertIn('"${xui_folder}/x-ui" migrate || exit 1',result)
+
+    def test_new_columns_do_not_mask_existing_data_changes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            with closing(database(root)) as db:
+                state=root/'state.json';state.write_text(json.dumps(compat.protected_state(root)))
+                db.execute("ALTER TABLE clients ADD COLUMN password TEXT DEFAULT ''");db.commit()
+                compat.preserve_client_flow(root,state);compat.verify_state(root,state)
+                db.execute("UPDATE clients SET uuid='lost'");db.commit()
+                with self.assertRaises(RuntimeError):compat.preserve_client_flow(root,state)
+                with self.assertRaises(RuntimeError):compat.verify_state(root,state)
+
     def test_native_global_flow_clobber_is_restored_but_other_loss_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

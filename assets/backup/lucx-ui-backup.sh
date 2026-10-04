@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+# Keep package hooks noninteractive during automated restores.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=l
+export NEEDRESTART_SUSPEND=1
 # lucx-ui-backup.sh — backup and restore LucX-UI panel + nginx + certs
 # Usage:
 #   lucx-ui-backup.sh backup           — create timestamped backup
@@ -1054,7 +1059,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.4'
+REVISION = '2026.10.04-280.5'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
@@ -1286,10 +1291,24 @@ def protected_state(root):
     return {'tables': tables, 'settings': saved_settings, 'files': files}
 
 
+def compare_existing_columns(previous, current):
+    # New panel releases add columns with defaults. Protect every pre-existing
+    # value and row; new schema fields have no prior value to compare against.
+    for table, rows in previous['tables'].items():
+        if not rows:
+            continue
+        fields = set().union(*(row.keys() for row in rows))
+        current['tables'][table] = sorted(
+            ({key: value for key, value in row.items() if key in fields}
+             for row in current['tables'].get(table, [])),
+            key=lambda row: json.dumps(row, sort_keys=True))
+
+
 def preserve_client_flow(root, state):
     """Restore only global flow clobbered by native SyncInbound; reject other loss."""
     previous = json.loads(state.read_text(encoding='utf-8'))
     current = protected_state(root)
+    compare_existing_columns(previous, current)
     old = {row['id']: row for row in previous['tables']['clients']}
     new = {row['id']: row for row in current['tables']['clients']}
     if old.keys() != new.keys():
@@ -1317,6 +1336,7 @@ def preserve_client_flow(root, state):
 def verify_state(root, state, before_repair=False):
     previous = json.loads(state.read_text(encoding='utf-8'))
     current = protected_state(root)
+    compare_existing_columns(previous, current)
     for section in ('tables','settings','files'):
         for name, value in previous[section].items():
             if current[section].get(name) != value:
@@ -1351,6 +1371,14 @@ def adapt_updater(path):
     if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
         raise RuntimeError('Native updater contract changed; panel has not been modified')
     text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Startup also migrates the schema. Keep it stopped until the explicit
+    # migration/protection checks complete to avoid concurrent ALTER TABLE.
+    for command in ('systemctl start x-ui', 'rc-service x-ui start'):
+        line = '        ' + command + ' > /dev/null 2>&1\n'
+        if text.count(line) > 1:
+            raise RuntimeError('Native updater start contract changed')
+        text = text.replace(line, '        : # Pro starts panel after migration checks\n')
+
     # Build/check once, under the Pro BBR guard, using the NEW bundled installer.
     text = text.replace(awg, '        true ||', 1)
     path.write_text(text, encoding='utf-8', newline='\n')
@@ -1870,6 +1898,14 @@ PY_TG_RESTORE
             systemctl start "$unit" 2>/dev/null || true
         fi
     }
+
+    # A oneshot ipset service may have been inactive at backup time although
+    # its sets existed in RAM. UFW still needs those sets after a fresh restore.
+    local ipset_archive
+    for ipset_archive in /etc/ipset.conf /etc/iptables/ipsets; do
+        [[ -s "$ipset_archive" && -f "$ipset_archive" ]] || continue
+        ipset restore -exist -f "$ipset_archive" || die "Failed to restore firewall ipsets"
+    done
 
     # ── systemd ───────────────────────────────────────────────────────────
     blue "==> Enabling and starting services..."

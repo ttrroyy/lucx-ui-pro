@@ -90,7 +90,7 @@ CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
 CHECK_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.04-280.4"
+PRO_COMPAT_REVISION="2026.10.04-280.5"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -1050,7 +1050,7 @@ choose_amneziawg() {
         echo '  2) Не устанавливать сейчас'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-2]: '
-        read -r ans </dev/tty || ans=""
+        read -r ans </dev/tty || return 1
         case "${ans// /}" in
             1) DEPLOY_AWG="y"; break ;;
             2) DEPLOY_AWG="n"; break ;;
@@ -1170,7 +1170,7 @@ choose_xray_dns() {
         echo '  6) Свой DoH'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-6]: '
-        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
         mapped=$(normalize_dns_choice "$ans")
         [[ -n "$mapped" ]] || continue
         if [[ "$mapped" == "5" && "${DEPLOY_AGH:-}" != "1" ]]; then
@@ -1179,7 +1179,7 @@ choose_xray_dns() {
         fi
         if [[ "$mapped" == "6" ]]; then
             echo -en 'DoH URL: '
-            if [[ -n "$tty" ]]; then read -r doh_url <"$tty" || doh_url=""; else read -r doh_url || doh_url=""; fi
+            if [[ -n "$tty" ]]; then read -r doh_url <"$tty" || return 1; else read -r doh_url || return 1; fi
             resolved=$(resolve_doh_for_hosts "$doh_url" 2>/dev/null || true)
             [[ -n "$resolved" ]] || continue
             host=$(printf '%s\n' "$resolved" | sed -n '1p')
@@ -1332,9 +1332,9 @@ choose_hy2_port() {
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Порт: '
         if [[ -n "$tty" ]]; then
-            read -r p <"$tty" || p=""
+            read -r p <"$tty" || return 1
         else
-            read -r p || p=""
+            read -r p || return 1
         fi
         p=$(echo "$p" | tr -d '[:space:]')
         if [[ ! "$p" =~ ^[0-9]+$ ]] || (( p < 1 || p > 65535 )); then
@@ -1375,7 +1375,7 @@ choose_extra_inbounds() {
         echo '5 - Telegram WEB-proxy'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выберите инбаунды:'
-        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         [[ -n "$mapped" ]] || continue
         if [[ ! "$mapped" =~ ^[1-5](,[1-5])*$ ]] ||
@@ -1418,7 +1418,7 @@ choose_extra_inbounds() {
             echo '2 - Нет, выбрать снова'
             msg_inf '──────────────────────────────────────────────────────────────────────────────────────────'
             echo -en 'Выбор [1-2]: '
-            if [[ -n "$tty" ]]; then read -r confirm <"$tty" || confirm=""; else read -r confirm || confirm=""; fi
+            if [[ -n "$tty" ]]; then read -r confirm <"$tty" || return 1; else read -r confirm || return 1; fi
             confirm=$(echo "$confirm" | tr -d '[:space:]')
             case "$confirm" in
                 1) ok=1; break ;;
@@ -1553,10 +1553,10 @@ read_tty_line() {
     # Readline (-e) keeps pasted text and terminal wrapping in sync.  The long
     # description is printed on its own line, so only the short marker wraps.
     if [[ -n "$tty" ]]; then
-        IFS= read -e -r -p '> ' ans <"$tty" || ans=""
+        IFS= read -e -r -p '> ' ans <"$tty" || return 1
     else
         printf '> ' >&2
-        IFS= read -r ans || ans=""
+        IFS= read -r ans || return 1
     fi
     # Remove CR from CRLF pastes and trim only the edges.  Embedded whitespace
     # stays intact and is rejected by domain validation instead of being joined.
@@ -1573,7 +1573,7 @@ prompt_domain_a_record() {
     while true; do
         ui "$prompt"
         ui $'\n'
-        read_tty_line
+        read_tty_line || return 1
         d=$(printf '%s' "$REPLY" | LC_ALL=C tr '[:upper:]' '[:lower:]')
         [[ -n "$d" ]] || continue
         if [[ ! "$d" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
@@ -1607,7 +1607,7 @@ choose_webproxy_domain() {
     fi
     while true; do
         printf -v p 'Домен для Telegram WEB-proxy (создайте A-запись на IP "%s"): ' "$IP4"
-        prompt_domain_a_record "$p"
+        prompt_domain_a_record "$p" || return 1
         d="$DOMAIN_INPUT"
         if [[ "$d" == "$domain" || "$d" == "$reality_domain" ]]; then
             ui_err "Домен WEB-proxy должен отличаться от домена панели и Reality."
@@ -1860,11 +1860,21 @@ PY_TG_NGINX
 
 remove_tproxy_inbound() {
     [[ -f "$XUIDB" ]] || return 0
-    python3 - "$XUIDB" <<'PY_TG_DELETE'
-import sqlite3, sys
+    python3 - "$XUIDB" "${1:-}" <<'PY_TG_DELETE'
+import json, sqlite3, sys
 con = sqlite3.connect(sys.argv[1], timeout=30)
 cur = con.cursor()
-ids = [r[0] for r in cur.execute("SELECT id FROM inbounds WHERE tag='inbound-tproxy'")]
+hostname = sys.argv[2]
+ids = []
+for row_id, protocol, tag, listen, port, raw in cur.execute('SELECT id,protocol,tag,listen,port,settings FROM inbounds'):
+    owned = tag == 'inbound-tproxy'
+    if not owned and hostname and protocol == 'tproxy' and listen == '127.0.0.1' and port == 11443:
+        try:
+            owned = json.loads(raw or '{}').get('hostname') == hostname
+        except (ValueError, AttributeError):
+            owned = False
+    if owned:
+        ids.append(row_id)
 def columns(table):
     try:
         return {r[1] for r in cur.execute('PRAGMA table_info("%s")' % table)}
@@ -1882,6 +1892,7 @@ try:
     cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
 except Exception:
     pass
+cur.close()
 con.close()
 PY_TG_DELETE
 }
@@ -1946,7 +1957,7 @@ uninstall_tg_web_proxy() {
             force_remove_tproxy_nginx "$proxy_domain" || nginx_cleanup_failed=1
         fi
     fi
-    remove_tproxy_inbound || return 1
+    remove_tproxy_inbound "$proxy_domain" || return 1
     rm -rf /var/www/tproxy
     rm -f /root/.lucx-tg-web-proxy-info
     # Keep the domain certificate and its /root/cert links for future use.
@@ -1987,7 +1998,7 @@ install_tg_web_proxy() {
         return 1
     fi
     install_shareonly_client_sync || {
-        remove_tproxy_inbound 2>/dev/null || true
+        remove_tproxy_inbound "$webproxy_domain" 2>/dev/null || true
         patch_tproxy_nginx uninstall "$webproxy_domain" 2>/dev/null || true
         rm -rf /var/www/tproxy /root/.lucx-tg-web-proxy-info
         return 1
@@ -2108,7 +2119,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.4'
+REVISION = '2026.10.04-280.5'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
@@ -2340,10 +2351,24 @@ def protected_state(root):
     return {'tables': tables, 'settings': saved_settings, 'files': files}
 
 
+def compare_existing_columns(previous, current):
+    # New panel releases add columns with defaults. Protect every pre-existing
+    # value and row; new schema fields have no prior value to compare against.
+    for table, rows in previous['tables'].items():
+        if not rows:
+            continue
+        fields = set().union(*(row.keys() for row in rows))
+        current['tables'][table] = sorted(
+            ({key: value for key, value in row.items() if key in fields}
+             for row in current['tables'].get(table, [])),
+            key=lambda row: json.dumps(row, sort_keys=True))
+
+
 def preserve_client_flow(root, state):
     """Restore only global flow clobbered by native SyncInbound; reject other loss."""
     previous = json.loads(state.read_text(encoding='utf-8'))
     current = protected_state(root)
+    compare_existing_columns(previous, current)
     old = {row['id']: row for row in previous['tables']['clients']}
     new = {row['id']: row for row in current['tables']['clients']}
     if old.keys() != new.keys():
@@ -2371,6 +2396,7 @@ def preserve_client_flow(root, state):
 def verify_state(root, state, before_repair=False):
     previous = json.loads(state.read_text(encoding='utf-8'))
     current = protected_state(root)
+    compare_existing_columns(previous, current)
     for section in ('tables','settings','files'):
         for name, value in previous[section].items():
             if current[section].get(name) != value:
@@ -2405,6 +2431,14 @@ def adapt_updater(path):
     if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
         raise RuntimeError('Native updater contract changed; panel has not been modified')
     text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Startup also migrates the schema. Keep it stopped until the explicit
+    # migration/protection checks complete to avoid concurrent ALTER TABLE.
+    for command in ('systemctl start x-ui', 'rc-service x-ui start'):
+        line = '        ' + command + ' > /dev/null 2>&1\n'
+        if text.count(line) > 1:
+            raise RuntimeError('Native updater start contract changed')
+        text = text.replace(line, '        : # Pro starts panel after migration checks\n')
+
     # Build/check once, under the Pro BBR guard, using the NEW bundled installer.
     text = text.replace(awg, '        true ||', 1)
     path.write_text(text, encoding='utf-8', newline='\n')
@@ -2672,7 +2706,7 @@ choose_adguard() {
         echo '  2) Нет'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-2]: '
-        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         case "$mapped" in
             1|2) DEPLOY_AGH="$mapped"; break ;;
@@ -2722,7 +2756,7 @@ choose_rkn_guard() {
         echo '  3) Нет'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-3]: '
-        if [[ -n "$tty" ]]; then read -r ans <"$tty" || ans=""; else read -r ans || ans=""; fi
+        if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         case "$mapped" in
             1) DEPLOY_RKN="1"; break ;;
@@ -3345,7 +3379,7 @@ fi
 
 # This is the first installation question. It is intentionally after the full
 # cleanup of any previous LucX installation, and before domain/DNS/RKN questions.
-choose_amneziawg
+choose_amneziawg || exit 1
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GET SERVER IP
@@ -3468,7 +3502,7 @@ validate_domains() {
     fi
     if [[ -z "$domain" ]]; then
         printf -v p 'Домен панели (создайте A-запись на IP "%s"): ' "$IP4"
-        prompt_domain_a_record "$p"
+        prompt_domain_a_record "$p" || return 1
         domain="$DOMAIN_INPUT"
     fi
     SubDomain=$(echo "$domain"   | sed 's/^[^ ]* \|\..*//g')
@@ -3483,7 +3517,7 @@ validate_domains() {
     if [[ -z "$reality_domain" ]]; then
         while true; do
             printf -v p 'Домен для Reality (создайте A-запись на IP "%s"): ' "$IP4"
-            prompt_domain_a_record "$p"
+            prompt_domain_a_record "$p" || return 1
             d="$DOMAIN_INPUT"
             if [[ "$d" == "$domain" ]]; then
                 ui_err "Домен панели и Reality должны отличаться."
@@ -5285,7 +5319,7 @@ maybe_reboot_for_awg() {
             echo '  2) Нет'
             msg_inf "────────────────────────────────────────────────────────────────────────────────"
             echo -en 'Выбор [1-2]: '
-            read -r ans </dev/tty || ans=""
+            read -r ans </dev/tty || return 1
             case "${ans// /}" in
                 1)
                     rm -f /etc/x-ui/.awg-reboot-needed
