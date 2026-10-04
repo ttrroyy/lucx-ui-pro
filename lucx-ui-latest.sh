@@ -1567,7 +1567,7 @@ choose_webproxy_domain() {
     [[ "${DEPLOY_TPROXY}" == "1" ]] || return 0
     [[ -n "${IP4:-}" ]] || get_server_ip
     local d p tproxy_autodomain="n"; webproxy_domain=""
-    choose_auto_domains tproxy_autodomain 'Создать ли auto-домен через sslip.io ?' || return 1
+    choose_auto_domains tproxy_autodomain 'Создать auto-домен через sslip.io для Telegram WEB-proxy?' singular || return 1
     if [[ "$tproxy_autodomain" == "y" ]]; then
         # Reuse this component's certificate/name during a repeated install.
         d="${1:-}"
@@ -3318,14 +3318,20 @@ if [[ $pub =~ $IP4_REGEX ]]; then IP4="$pub"; fi
 choose_auto_domains() {
     local ans mapped tty=""
     local result_var="${1:-AUTODOMAIN}"
-    local question="${2:-Создать ли auto-домены через sslip.io ?}"
+    local question="${2:-Создать auto-домены через sslip.io для панели и REALITY?}"
+    local domain_form="${3:-plural}"
     [[ -t 0 && -r /dev/tty ]] && tty="/dev/tty"
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         msg_inf "$question"
-        echo '  1) Да — домены будут созданы автоматически (только для теста, повышенный риск бана ТСПУ)'
-        echo '  2) Нет — ручной ввод доменов'
+        if [[ "$domain_form" == "singular" ]]; then
+            echo '  1) Да — домен будет создан автоматически (только для теста, повышенный риск бана ТСПУ)'
+            echo '  2) Нет — ручной ввод домена'
+        else
+            echo '  1) Да — домены будут созданы автоматически (только для теста, повышенный риск бана ТСПУ)'
+            echo '  2) Нет — ручной ввод доменов'
+        fi
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выбор [1-2]: '
         if [[ -n "$tty" ]]; then
