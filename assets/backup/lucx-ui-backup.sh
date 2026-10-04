@@ -523,9 +523,23 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     print('AWG report:', REPORT)
     return 0 if local_ready else 1
 
+def reboot_required():
+    """Distinguish a successful fresh kernel upgrade from a broken build."""
+    if not REPORT.is_file() or not Path('/etc/x-ui/.awg-reboot-needed').is_file():
+        return False
+    report = json.loads(REPORT.read_text())
+    current = os.uname().release
+    modules = report.get('required_modules', {})
+    return (report.get('current_kernel') == current
+            and report.get('installer_exit') in (None, 0)
+            and not report.get('errors') and report.get('tools_available')
+            and not modules.get(current) and not Path('/lib/modules', current, 'build').exists()
+            and any(k != current and ok for k, ok in modules.items())
+            and all(ok for k, ok in modules.items() if k != current))
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['patch-source', 'patch-installer', 'needs-rebuild', 'ready', 'cleanup'])
+    parser.add_argument('action', choices=['patch-source', 'patch-installer', 'needs-rebuild', 'ready', 'reboot-required', 'cleanup'])
     parser.add_argument('path', nargs='?')
     parser.add_argument('--installed', action='store_true')
     parser.add_argument('--next-kernel')
@@ -537,6 +551,8 @@ def main():
         patch_installer(args.path)
     elif args.action == 'needs-rebuild':
         return 0 if needs_rebuild() else 1
+    elif args.action == 'reboot-required':
+        return 0 if reboot_required() else 1
     elif args.action == 'cleanup':
         MARKER.unlink(missing_ok=True)
         REPORT.unlink(missing_ok=True)
@@ -823,11 +839,11 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.1'
+REVISION = '2026.10.04-280.2'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
-def client_sync_sql():
+def client_sync_sql(client_columns=(), link_columns=('client_id', 'inbound_id')):
     # Rebuild from normalized records, not an email snapshot of a deleted row.
     rebuild = """UPDATE inbounds SET settings = json_set(
       CASE WHEN json_valid(settings) THEN settings ELSE '{}' END, '$.clients',
@@ -837,12 +853,44 @@ def client_sync_sql():
         WHERE ci.inbound_id=inbounds.id AND c.email != ''), '[]')))
       WHERE protocol IN %s""" % PROTOCOLS
     sql = 'BEGIN IMMEDIATE;\n'
-    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete'):
+    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete', 'rename_merge'):
         sql += f'DROP TRIGGER IF EXISTS lucx_shareonly_clients_{name};\n'
     # Old Pro component removals and old archives can leave dangling links.
     sql += ('DELETE FROM client_inbounds WHERE client_id NOT IN (SELECT id FROM clients) '
             'OR inbound_id NOT IN (SELECT id FROM inbounds);\n')
     sql += rebuild + ';\n'
+    # LucX 280's share-only UpdateInboundClient creates a second normalized
+    # record before Update() renames the original. Merge that transient row
+    # only at the final rename, with a matching stable identity AND nonempty
+    # share-only memberships contained in the original (also filtered edits).
+    # Ordinary duplicate emails still fail.
+    if {'uuid', 'sub_id'} <= set(client_columns):
+        assignments = ','.join('"'+c+'"=(SELECT "'+c+'" FROM clients WHERE email=NEW.email)'
+                               for c in client_columns if c not in ('id', 'email'))
+        link_names = ','.join('"'+c+'"' for c in link_columns)
+        link_values = ','.join('OLD.id' if c == 'client_id' else '"'+c+'"' for c in link_columns)
+        sql += f'''CREATE TRIGGER lucx_shareonly_clients_rename_merge
+          BEFORE UPDATE OF email ON clients
+          WHEN NEW.email != OLD.email AND EXISTS (
+            SELECT 1 FROM clients d WHERE d.email=NEW.email AND d.id!=OLD.id
+              AND ((d.sub_id!='' AND d.sub_id=OLD.sub_id) OR (d.uuid!='' AND d.uuid=OLD.uuid))
+              AND EXISTS (SELECT 1 FROM client_inbounds WHERE client_id=OLD.id)
+              AND EXISTS (SELECT 1 FROM client_inbounds WHERE client_id=d.id)
+              AND NOT EXISTS (
+                SELECT 1 FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id
+                WHERE ci.client_id=OLD.id AND i.protocol NOT IN {PROTOCOLS})
+              AND EXISTS (SELECT 1 FROM client_inbounds a JOIN client_inbounds b
+                          ON a.inbound_id=b.inbound_id WHERE a.client_id=OLD.id AND b.client_id=d.id)
+              AND NOT EXISTS (SELECT ci.inbound_id FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id
+                              WHERE ci.client_id=d.id AND i.protocol IN {PROTOCOLS}
+                              EXCEPT SELECT inbound_id FROM client_inbounds WHERE client_id=OLD.id))
+          BEGIN
+            UPDATE clients SET {assignments} WHERE id=OLD.id;
+            INSERT OR IGNORE INTO client_inbounds ({link_names})
+              SELECT {link_values} FROM client_inbounds WHERE client_id=(SELECT id FROM clients WHERE email=NEW.email);
+            DELETE FROM client_inbounds WHERE client_id=(SELECT id FROM clients WHERE email=NEW.email);
+            DELETE FROM clients WHERE email=NEW.email AND id!=OLD.id;
+          END;\n'''
     for name, event, predicate in (
         ('ins', 'AFTER INSERT ON client_inbounds', 'id=NEW.inbound_id'),
         ('del', 'AFTER DELETE ON client_inbounds', 'id=OLD.inbound_id'),
@@ -871,7 +919,8 @@ def sync_clients(db):
         existing = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
         if not columns <= existing:
             raise RuntimeError(f'Unsupported panel schema: {table}; no migration performed')
-    db.executescript(client_sync_sql())
+    db.executescript(client_sync_sql([row[1] for row in db.execute('PRAGMA table_info(clients)')],
+                                    [row[1] for row in db.execute('PRAGMA table_info(client_inbounds)')]))
 
 
 def provider_route(settings):
@@ -938,6 +987,15 @@ def remove_forwarding_override(root):
     # Do not write ip_forward=0: active panel tunnels own runtime forwarding.
 
 
+def repair_rkn_timers(root):
+    for name, delay in (('list', '15min'), ('self', '30min')):
+        path = root / f'etc/systemd/system/rkn-guard-{name}-update.timer'
+        if path.is_file():
+            text = path.read_text(encoding='utf-8')
+            patched = re.sub(r'(?m)^OnBootSec=' + delay + r'$', 'OnActiveSec=' + delay, text)
+            if patched != text:
+                path.write_text(patched, encoding='utf-8')
+
 def migrate(root, clients_only=False):
     with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db, db:
         sync_clients(db)
@@ -952,6 +1010,10 @@ def migrate(root, clients_only=False):
                        (json.dumps(data, ensure_ascii=False), row_id))
         db.commit()
     remove_forwarding_override(root)
+    repair_rkn_timers(root)
+    state = root / 'var/lib/lucx-ui-preinstall'
+    if (state / 'owned-by-lucx-ui-pro').is_file():
+        (state / 'compat-revision').write_text(REVISION + '\n', encoding='utf-8')
 
 
 def inspect(root):
@@ -981,7 +1043,7 @@ def inspect(root):
         ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
     ):
         print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
-    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard.')
+    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard, таймеры RKN.')
     print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
     print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
 
@@ -1385,6 +1447,7 @@ PY_TG_RESTORE
         for timer in rkn-guard-list-update.timer rkn-guard-self-update.timer; do
             [[ -f "/etc/systemd/system/${timer}" ]] || continue
             restore_unit_state "$timer"
+            if systemctl is-active --quiet "$timer"; then systemctl restart "$timer" || die "Failed to reschedule $timer"; fi
         done
     fi
 

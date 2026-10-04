@@ -295,9 +295,23 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     print('AWG report:', REPORT)
     return 0 if local_ready else 1
 
+def reboot_required():
+    """Distinguish a successful fresh kernel upgrade from a broken build."""
+    if not REPORT.is_file() or not Path('/etc/x-ui/.awg-reboot-needed').is_file():
+        return False
+    report = json.loads(REPORT.read_text())
+    current = os.uname().release
+    modules = report.get('required_modules', {})
+    return (report.get('current_kernel') == current
+            and report.get('installer_exit') in (None, 0)
+            and not report.get('errors') and report.get('tools_available')
+            and not modules.get(current) and not Path('/lib/modules', current, 'build').exists()
+            and any(k != current and ok for k, ok in modules.items())
+            and all(ok for k, ok in modules.items() if k != current))
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['patch-source', 'patch-installer', 'needs-rebuild', 'ready', 'cleanup'])
+    parser.add_argument('action', choices=['patch-source', 'patch-installer', 'needs-rebuild', 'ready', 'reboot-required', 'cleanup'])
     parser.add_argument('path', nargs='?')
     parser.add_argument('--installed', action='store_true')
     parser.add_argument('--next-kernel')
@@ -309,6 +323,8 @@ def main():
         patch_installer(args.path)
     elif args.action == 'needs-rebuild':
         return 0 if needs_rebuild() else 1
+    elif args.action == 'reboot-required':
+        return 0 if reboot_required() else 1
     elif args.action == 'cleanup':
         MARKER.unlink(missing_ok=True)
         REPORT.unlink(missing_ok=True)

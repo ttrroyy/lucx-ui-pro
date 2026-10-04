@@ -5,6 +5,8 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 repo = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('pro_compat', repo / 'assets/compat/pro-compat.py')
@@ -13,6 +15,91 @@ spec.loader.exec_module(compat)
 
 
 class ClientLinks(unittest.TestCase):
+    def test_mixed_rename_moves_normal_protocol_links_back_to_original(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.executescript('''CREATE TABLE inbounds(id INTEGER PRIMARY KEY,protocol TEXT,settings TEXT);
+              CREATE TABLE clients(id INTEGER PRIMARY KEY,email TEXT UNIQUE,enable INTEGER,uuid TEXT,sub_id TEXT);
+              CREATE TABLE client_inbounds(client_id INTEGER,inbound_id INTEGER,flow_override TEXT,created_at INTEGER,PRIMARY KEY(client_id,inbound_id));
+              INSERT INTO clients VALUES(1,'old',1,'uuid','sub');
+              INSERT INTO inbounds VALUES(1,'qwdtt','{}'),(2,'csqtt','{}'),(3,'tproxy','{}'),(4,'vless','{"clients":[{"email":"new","id":"uuid"}]}');
+              INSERT INTO client_inbounds VALUES(1,1,'',10),(1,2,'',10),(1,3,'',10);''')
+            compat.sync_clients(db)
+            db.execute("INSERT INTO clients VALUES(2,'new',0,'uuid','sub')")
+            db.executemany('INSERT INTO client_inbounds VALUES(2,?,?,20)',[(1,''),(2,''),(3,''),(4,'xtls-rprx-vision')])
+            db.execute("UPDATE clients SET email='new' WHERE id=1")
+            self.assertEqual(db.execute('SELECT id,email,enable FROM clients').fetchall(),[(1,'new',0)])
+            self.assertEqual(db.execute('SELECT client_id,flow_override,created_at FROM client_inbounds WHERE inbound_id=4').fetchone(),(1,'xtls-rprx-vision',20))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id=1').fetchone()[0],4)
+
+    def test_rkn_timer_reinstall_and_restore_reschedule(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);units=root/'etc/systemd/system';units.mkdir(parents=True)
+            for name,delay,interval in [('list','15min','6h'),('self','30min','1d')]:
+                path=units/f'rkn-guard-{name}-update.timer'
+                path.write_text(f'[Timer]\nOnBootSec={delay}\nOnUnitActiveSec={interval}\nRandomizedDelaySec=20min\n')
+            custom=units/'unrelated.timer';custom.write_text('OnBootSec=15min\n')
+            compat.repair_rkn_timers(root);compat.repair_rkn_timers(root)
+            for name,delay in [('list','15min'),('self','30min')]:
+                text=(units/f'rkn-guard-{name}-update.timer').read_text()
+                self.assertIn('OnActiveSec='+delay,text);self.assertNotIn('OnBootSec=',text)
+            self.assertEqual(custom.read_text(),'OnBootSec=15min\n')
+
+    def test_awg_reboot_pending_is_not_a_failed_build(self):
+        spec=importlib.util.spec_from_file_location('awg_compat',repo/'assets/compat/awg-compat.py')
+        awg=importlib.util.module_from_spec(spec);spec.loader.exec_module(awg)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            marker=root/'etc/x-ui/.awg-reboot-needed';marker.parent.mkdir(parents=True);marker.touch()
+            report=root/'report.json'
+            data={'current_kernel':'6.12.63','installer_exit':0,'errors':[], 'tools_available':True,
+                  'required_modules':{'6.12.63':False,'6.12.111':True}}
+            def mapped_path(*parts):
+                path=Path(*parts)
+                return root/str(path).lstrip('/\\') if str(parts[0]).startswith('/') else path
+            with patch.object(awg,'REPORT',report),patch.object(awg,'Path',mapped_path),patch.object(awg.os,'uname',return_value=SimpleNamespace(release='6.12.63'),create=True):
+                report.write_text(json.dumps(data));self.assertTrue(awg.reboot_required())
+                for key,value in [('installer_exit',1),('errors',['compile failed']),('tools_available',False),('required_modules',{'6.12.63':False,'6.12.111':False})]:
+                    changed=dict(data);changed[key]=value;report.write_text(json.dumps(changed));self.assertFalse(awg.reboot_required())
+                report.write_text(json.dumps(data));headers=root/'lib/modules/6.12.63/build';headers.mkdir(parents=True)
+                self.assertFalse(awg.reboot_required())
+
+    def test_panel_share_only_rename_sequence_keeps_original_identity(self):
+        for recursive in (0, 1):
+            with self.subTest(recursive=recursive), closing(sqlite3.connect(':memory:')) as db:
+                db.executescript('''CREATE TABLE inbounds(id INTEGER PRIMARY KEY,protocol TEXT,settings TEXT);
+                  CREATE TABLE clients(id INTEGER PRIMARY KEY,email TEXT UNIQUE,enable INTEGER,uuid TEXT,sub_id TEXT,total_gb INTEGER);
+                  CREATE TABLE client_inbounds(client_id INTEGER,inbound_id INTEGER,PRIMARY KEY(client_id,inbound_id));
+                  INSERT INTO clients VALUES(1,'old',1,'uuid','sub',100);
+                  INSERT INTO inbounds VALUES(1,'qwdtt','{}'),(2,'csqtt','{}'),(3,'tproxy','{}');
+                  INSERT INTO client_inbounds VALUES(1,1),(1,2),(1,3);''')
+                db.execute(f'PRAGMA recursive_triggers={recursive}')
+                compat.sync_clients(db)
+                # Actual panel fanout inserts by new email, links every inbound,
+                # then renames the original row by its original primary key.
+                db.execute("INSERT INTO clients VALUES(2,'renamed',0,'uuid','sub',200)")
+                for inbound_id in (1, 2, 3):
+                    db.execute('INSERT INTO client_inbounds VALUES(2,?)', (inbound_id,))
+                db.execute("UPDATE clients SET email='renamed' WHERE id=1 AND email='old'")
+                self.assertEqual(db.execute('SELECT * FROM clients').fetchall(), [(1,'renamed',0,'uuid','sub',200)])
+                self.assertEqual(db.execute('SELECT client_id,inbound_id FROM client_inbounds').fetchall(),[(1,1),(1,2),(1,3)])
+                for (settings,) in db.execute('SELECT settings FROM inbounds'):
+                    self.assertEqual(json.loads(settings)['clients'],[{'email':'renamed','enable':False}])
+                # A different identity must never be silently merged.
+                db.execute("INSERT INTO clients VALUES(3,'occupied',1,'other','other',300)")
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("UPDATE clients SET email='occupied' WHERE id=1")
+                db.execute("INSERT INTO clients VALUES(4,'partial',1,'uuid','sub',300)")
+                db.execute('INSERT INTO client_inbounds VALUES(4,1)')
+                db.execute("UPDATE clients SET email='partial' WHERE id=1")
+                self.assertEqual(db.execute('SELECT inbound_id FROM client_inbounds WHERE client_id=1').fetchall(),[(1,),(2,),(3,)])
+                self.assertIsNone(db.execute('SELECT id FROM clients WHERE id=4').fetchone())
+                db.execute("INSERT INTO inbounds VALUES(4,'vless','{}')")
+                db.execute('INSERT INTO client_inbounds VALUES(1,4)')
+                db.execute("INSERT INTO clients VALUES(5,'mixed',1,'uuid','sub',300)")
+                db.execute('INSERT INTO client_inbounds VALUES(5,1)')
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("UPDATE clients SET email='mixed' WHERE id=1")
+
     def test_backfill_rename_detach_and_delete_both_directions(self):
         for recursive in (0, 1):
             with self.subTest(recursive=recursive), closing(sqlite3.connect(':memory:')) as db:
