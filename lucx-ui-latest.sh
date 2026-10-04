@@ -83,6 +83,9 @@ INSTALL=""
 AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
+UPDATE_COMPAT=""
+CHECK_COMPAT=""
+PRO_COMPAT_REVISION="2026.10.04-280.1"
 DNS_CHOICE=""
 DEPLOY_QWDTT=""
 DEPLOY_CSQTT=""
@@ -100,6 +103,7 @@ TG_WEB_PROXY_UNINSTALL=""
 DEPLOY_RKN=""
 DEPLOY_AWG=""
 BASE_DEPENDENCIES_READY="0"
+AWG_INSTALL_FAILED=0
 CUSTOM_DOH_URL=""
 CUSTOM_DOH_HOST=""
 CUSTOM_DOH_IP=""
@@ -338,6 +342,8 @@ usage() {
     cat <<'EOF'
 Usage:
   bash lucx-ui-latest.sh -install y [options]
+  bash lucx-ui-latest.sh -update y [-version v3.9.0-lucx.280]
+  bash lucx-ui-latest.sh -check y [-version v3.9.0-lucx.280]
   bash lucx-ui-latest.sh -uninstall y
   bash lucx-ui-latest.sh -adguard y
   bash lucx-ui-latest.sh -adguard-uninstall y
@@ -358,6 +364,8 @@ require_arg_value() {
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        -update)           require_arg_value "$@"; UPDATE_COMPAT="$2";      shift 2 ;;
+        -check)            require_arg_value "$@"; CHECK_COMPAT="$2";       shift 2 ;;
         -install)          require_arg_value "$@"; INSTALL="$2";            shift 2 ;;
         -ONLY_CF_IP_ALLOW) require_arg_value "$@"; CFALLOW="$2";            shift 2 ;;
         -version)          require_arg_value "$@"; PANEL_VERSION="$2";      shift 2 ;;
@@ -373,7 +381,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-for _action_value in "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$UPDATE_COMPAT" "$CHECK_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
     [[ -z "$_action_value" || "$_action_value" == "y" ]] || {
@@ -388,7 +396,7 @@ done
 }
 
 _action_count=0
-for _action_value in "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$UPDATE_COMPAT" "$CHECK_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
     [[ "$_action_value" == "y" ]] && _action_count=$((_action_count + 1))
@@ -398,6 +406,296 @@ if (( _action_count != 1 )); then
     usage
     exit 2
 fi
+
+# A check is read-only; package download, backup and mutations follow the menu.
+compat_supported_tag() {
+    [[ "$1" == "v3.8.5-lucx.279" || "$1" == "v3.9.0-lucx.280" ]]
+}
+
+fetch_release_info() {
+    local ref="$1" output="$2"
+    if [[ "$ref" == latest ]]; then ref=latest; else ref="tags/$ref"; fi
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+        "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/$ref" -o "$output"
+}
+
+release_tag() {
+    python3 - "$1" <<'PY_RELEASE_TAG'
+import json, re, sys
+data = json.load(open(sys.argv[1], encoding='utf-8'))
+tag = data.get('tag_name', '')
+if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-lucx\.[0-9]+', tag) or data.get('draft') or data.get('prerelease'):
+    raise SystemExit('Not a stable LucX release')
+print(tag)
+PY_RELEASE_TAG
+}
+
+stage_panel_update() {
+    local info="$1" stage="$2" url digest
+    url=$(python3 - "$info" "$(_arch)" <<'PY_RELEASE_ASSET'
+import json, sys
+data = json.load(open(sys.argv[1], encoding='utf-8'))
+name = 'x-ui-linux-' + sys.argv[2] + '.tar.gz'
+asset = next((a for a in data['assets'] if a['name'] == name), None)
+if not asset:
+    raise SystemExit('No release asset for this CPU')
+print(asset['browser_download_url'])
+PY_RELEASE_ASSET
+) || return 1
+    curl -fSL --retry 3 --connect-timeout 20 --max-time 900 "$url" -o "$stage/panel.tar.gz" || return 1
+    # Updates require verification even if an old fresh-install path permits 404.
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 "$url.sha256" -o "$stage/panel.sha256" || return 1
+    digest=$(awk 'NR==1 {print $1}' "$stage/panel.sha256")
+    [[ "$digest" =~ ^[0-9a-f]{64}$ && "$digest" == "$(sha256sum "$stage/panel.tar.gz" | awk '{print $1}')" ]] || return 1
+    python3 - "$stage/panel.tar.gz" "$stage/release" <<'PY_UPDATE_EXTRACT'
+import pathlib, sys, tarfile
+destination = pathlib.Path(sys.argv[2])
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+    for member in archive.getmembers():
+        name = pathlib.PurePosixPath(member.name)
+        if name.is_absolute() or '..' in name.parts or not name.parts or name.parts[0] != 'x-ui':
+            raise SystemExit('Unsafe panel archive path')
+        if member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
+            raise SystemExit('Unsupported panel archive member')
+    archive.extractall(destination)
+PY_UPDATE_EXTRACT
+    [[ $? -eq 0 && -s "$stage/release/x-ui/x-ui" ]] || return 1
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+        "https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/$UPDATE_TARGET/x-ui.sh" -o "$stage/x-ui.cli" || return 1
+    bash -n "$stage/x-ui.cli" || return 1
+    chmod +x "$stage/release/x-ui/x-ui"
+    local actual
+    actual=$("$stage/release/x-ui/x-ui" -v) || return 1
+    [[ "${actual#v}" == "${UPDATE_TARGET#v}" ]] || {
+        msg_err "Downloaded binary reports an unexpected version: $actual"; return 1;
+    }
+}
+
+check_panel_http() {
+    local endpoint code
+    endpoint=$(python3 - "$XUIDB" <<'PY_UPDATE_HTTP'
+from contextlib import closing
+import sqlite3, sys
+with closing(sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)) as db:
+    if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+        raise SystemExit('Panel database integrity check failed')
+    settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
+port = int(settings.get('webPort', 54321))
+if not 1 <= port <= 65535:
+    raise SystemExit('Invalid panel port')
+scheme = 'https' if settings.get('webCertFile') and settings.get('webKeyFile') else 'http'
+prefix = '/' + settings.get('webBasePath', '/').strip('/') + '/'
+prefix = prefix.replace('//', '/')
+print(f'{scheme}://127.0.0.1:{port}{prefix}')
+PY_UPDATE_HTTP
+) || return 1
+    code=$(curl -ksSL --max-redirs 5 --retry 2 --connect-timeout 5 --max-time 20 \
+        -o /dev/null -w '%{http_code}' "$endpoint") || return 1
+    [[ "$code" == 200 ]] || { msg_err "Panel HTTP check failed: $code"; return 1; }
+}
+
+update_compatibility() (
+    # Subshell isolates traps and cd from the installer entry point.
+    umask 077
+    command -v python3 >/dev/null && command -v curl >/dev/null && command -v flock >/dev/null || {
+        msg_err 'Для проверки нужны python3, curl и flock (util-linux).'; return 1;
+    }
+    [[ -s "$XUIDB" && -x /usr/local/x-ui/x-ui ]] || { msg_err 'Панель не установлена.'; return 1; }
+    local stage installed latest target choice script_commit installed_revision
+    _arch >/dev/null || return 1
+    stage=$(mktemp -d /var/tmp/lucx-pro-update.XXXXXX) || return 1
+    trap 'rm -rf -- "$stage"' EXIT
+    exec 9>/run/lock/lucx-ui-pro-update.lock
+    flock -n 9 || { msg_err 'Другое обновление уже запущено.'; return 1; }
+    installed=$(/usr/local/x-ui/x-ui -v) || return 1
+    installed="v${installed#v}"
+    fetch_release_info latest "$stage/latest.json" || return 1
+    latest=$(release_tag "$stage/latest.json") || return 1
+    target="${PANEL_VERSION:-latest}"
+    if [[ "$target" == latest ]]; then
+        target="$latest"
+        cp "$stage/latest.json" "$stage/target.json"
+    else
+        target="v${target#v}"
+        fetch_release_info "$target" "$stage/target.json" || return 1
+        [[ "$(release_tag "$stage/target.json")" == "$target" ]] || return 1
+    fi
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+        https://api.github.com/repos/ttrroyy/lucx-ui-pro/commits/main -o "$stage/pro.json" || return 1
+    script_commit=$(python3 - "$stage/pro.json" <<'PY_PRO_COMMIT'
+import json, re, sys
+sha = json.load(open(sys.argv[1], encoding='utf-8')).get('sha', '')
+if not re.fullmatch('[0-9a-f]{40}', sha):
+    raise SystemExit('Cannot determine Pro commit')
+print(sha)
+PY_PRO_COMMIT
+) || return 1
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+        "https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/$script_commit/lucx-ui-latest.sh" -o "$stage/latest-pro.sh" || return 1
+    installed_revision=$(cat "$PREINSTALL_STATE_DIR/compat-revision" 2>/dev/null || echo 'legacy/unknown')
+    echo "Панель VPS: $installed; последний стабильный релиз: $latest; цель (-version): $target"
+    echo "Логика Pro VPS: $installed_revision; запущенный скрипт: $PRO_COMPAT_REVISION"
+    echo "Последний Pro GitHub: $script_commit"
+    grep -m1 '^PRO_COMPAT_REVISION=' "$stage/latest-pro.sh" || true
+    run_pro_compat report || return 1
+    echo 'UFW сейчас:'
+    ufw status verbose 2>/dev/null || true
+    echo 'BBR / qdisc / forwarding сейчас:'
+    sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.ipv4.ip_forward 2>/dev/null || true
+    echo "Ядро VPS: $(uname -r)"
+    echo "AWG модуль на диске: $(modinfo -F version amneziawg 2>/dev/null || echo 'не установлен')"
+    echo "AWG загруженный модуль: $(cat /sys/module/amneziawg/version 2>/dev/null || echo 'не загружен')"
+    command -v dkms >/dev/null && dkms status amneziawg 2>/dev/null || true
+    [[ "$CHECK_COMPAT" != y ]] || return 0
+    if ! grep -qx "PRO_COMPAT_REVISION=\"$PRO_COMPAT_REVISION\"" "$stage/latest-pro.sh"; then
+        msg_err 'Логика запущенного скрипта отличается от GitHub. Запустите свежую команду из README.'
+        return 1
+    fi
+    while true; do
+        echo
+        msg_err 'Обновление остановит панель и VPN-соединения. Сначала будет создан полный backup.'
+        echo 'CSQTT будет переведён в штатный direct-режим; его трафик обходит Xray DNS/routing.'
+        echo 'UFW allow routed сохраняется; Pro больше не дублирует ip_forward=1.'
+        echo "  1) Обновить панель до $target и исправить совместимость"
+        echo "  2) Исправить совместимость текущей панели $installed без обновления бинарника"
+        echo '  3) Отмена'
+        if [[ -t 0 && -r /dev/tty ]]; then
+            read -r -p 'Выбор [1-3]: ' choice </dev/tty || return 0
+        else
+            read -r -p 'Выбор [1-3]: ' choice || return 0
+        fi
+        case "${choice// /}" in
+            1) UPDATE_TARGET="$target"; break ;;
+            2) UPDATE_TARGET="$installed"; break ;;
+            3) msg_inf 'Обновление отменено. Панель не изменена.'; return 0 ;;
+            *) continue ;;
+        esac
+    done
+    compat_supported_tag "$UPDATE_TARGET" || {
+        msg_err "Для $UPDATE_TARGET ещё нет проверенных миграций в этом скрипте. Обновление остановлено."; return 1;
+    }
+    if [[ "${choice// /}" == 1 ]]; then
+        python3 - "$installed" "$UPDATE_TARGET" <<'PY_NO_DOWNGRADE'
+import re, sys
+def build(tag):
+    match = re.fullmatch(r'v\d+\.\d+\.\d+-lucx\.(\d+)', tag)
+    if not match:
+        raise SystemExit('Unknown installed version; automatic update refused')
+    return int(match[1])
+if build(sys.argv[2]) < build(sys.argv[1]):
+    raise SystemExit('Downgrade refused; choose compatibility repair for the current version')
+PY_NO_DOWNGRADE
+        [[ $? -eq 0 ]] || return 1
+        stage_panel_update "$stage/target.json" "$stage" || return 1
+    fi
+    # Freeze backup implementation to the same reviewed Pro commit as the report.
+    curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+        "https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/$script_commit/assets/backup/lucx-ui-backup.sh" \
+        -o "$stage/backup.sh" || return 1
+    bash -n "$stage/backup.sh" || return 1
+    bash "$stage/backup.sh" backup || return 1
+    msg_inf 'Полный backup сохранён в /var/backups/x-ui. Выполняются миграции.'
+    local snapshot_kb available_kb
+    snapshot_kb=$(du -skc /etc/x-ui /etc/nginx /etc/ufw /etc/default/ufw /etc/sysctl.d \
+        /usr/local/x-ui /usr/bin/x-ui /usr/local/lib/lucx-ui-pro \
+        /usr/local/sbin/lucx-awg-sysctl-guard /etc/systemd/system \
+        /var/www/subpage /var/lib/lucx-ui-preinstall 2>/dev/null | awk 'END {print $1}')
+    available_kb=$(df -Pk "$stage" | awk 'NR==2 {print $4}')
+    [[ "$snapshot_kb" =~ ^[0-9]+$ && "$available_kb" =~ ^[0-9]+$ ]] || return 1
+    (( available_kb >= snapshot_kb + 65536 )) || {
+        msg_err 'Недостаточно места для локального отката; панель не обновлена.'; return 1;
+    }
+    local was_active=0 failed=0 awg_present=0
+    systemctl is-active --quiet x-ui && was_active=1
+    if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/x-ui/.awg-module-version ]]; then awg_present=1; fi
+    systemctl stop x-ui || return 1
+    # Rollback storage includes DB + helpers + nginx/UFW and service definitions;
+    # panel migrations can change SQLite schema, so binary-only rollback is unsafe.
+    mkdir "$stage/rollback" || { (( was_active == 0 )) || systemctl start x-ui; return 1; }
+    local entry
+    for entry in /etc/x-ui /etc/nginx /etc/ufw /etc/default/ufw /etc/sysctl.d \
+                 /usr/local/x-ui /usr/bin/x-ui /usr/local/lib/lucx-ui-pro \
+                 /usr/local/sbin/lucx-awg-sysctl-guard /etc/systemd/system \
+                 /var/www/subpage /var/lib/lucx-ui-preinstall; do
+        [[ ! -e "$entry" ]] || cp -a --parents "$entry" "$stage/rollback/" || {
+            (( was_active == 0 )) || systemctl start x-ui
+            return 1
+        }
+    done
+    if [[ "${choice// /}" == 1 ]]; then
+        # Merge the release over existing binaries: tunnel configs, uploaded
+        # sidecars and geodata absent from the release remain intact.
+        cp -a "$stage/release/x-ui/." /usr/local/x-ui/ || failed=1
+        install -m 0755 "$stage/x-ui.cli" /usr/bin/x-ui || failed=1
+        chmod +x /usr/local/x-ui/x-ui /usr/local/x-ui/bin/* 2>/dev/null || true
+        (( failed )) || /usr/local/x-ui/x-ui migrate || failed=1
+    fi
+    (( failed )) || run_pro_compat apply || failed=1
+    (( failed )) || install_awg_sysctl_guard || failed=1
+    (( failed )) || /usr/local/sbin/lucx-awg-sysctl-guard || failed=1
+    if (( failed == 0 )); then
+        patch_panel_awg_command || failed=1
+        patch_panel_bbr_script || failed=1
+        if (( awg_present )); then
+            install_awg_kernel || failed=1
+            [[ "${AWG_INSTALL_FAILED:-0}" == 0 ]] || failed=1
+            python3 /usr/local/lib/lucx-ui-pro/awg-compat.py ready || failed=1
+        fi
+    fi
+    (( failed )) || nginx -t || failed=1
+    if (( failed == 0 )); then
+        if ufw status | grep -q '^Status: active'; then ufw reload || failed=1; fi
+        systemctl daemon-reload || failed=1
+        systemctl reload nginx || failed=1
+        if (( was_active )); then
+            restart_xui_wait || failed=1
+            (( failed )) || check_panel_http || failed=1
+        fi
+    fi
+    if (( failed )); then
+        msg_err 'Обновление не прошло проверку. Возвращаем файлы, DB и бинарники из локального снимка.'
+        systemctl stop x-ui || true
+        systemctl stop lucx-awg-sysctl-guard.path lucx-awg-readiness.service 2>/dev/null || true
+        # Replace panel-owned directories; restore shared system directories by
+        # copying saved files, without removing unrelated units or sysctl files.
+        for entry in /etc/x-ui /etc/nginx /etc/ufw /etc/default/ufw /etc/sysctl.d \
+                     /usr/local/x-ui /usr/bin/x-ui /usr/local/lib/lucx-ui-pro \
+                     /usr/local/sbin/lucx-awg-sysctl-guard /etc/systemd/system \
+                     /var/www/subpage /var/lib/lucx-ui-preinstall; do
+            if [[ -e "$stage/rollback$entry" ]]; then
+                case "$entry" in
+                    /usr/local/x-ui|/etc/x-ui|/usr/local/lib/lucx-ui-pro|/var/www/subpage)
+                        rm -rf -- "$entry"
+                        cp -a "$stage/rollback$entry" "$entry" || return 1 ;;
+                    *) cp -a "$stage/rollback$entry" "$(dirname "$entry")/" || return 1 ;;
+                esac
+            fi
+        done
+        # Remove only helpers/units introduced by this attempt, including their
+        # enable symlinks. Shared systemd/sysctl directories remain intact.
+        for entry in /usr/local/sbin/lucx-awg-sysctl-guard \
+                     /etc/systemd/system/lucx-awg-sysctl-guard.service \
+                     /etc/systemd/system/lucx-awg-sysctl-guard.path \
+                     /etc/systemd/system/lucx-awg-readiness.service \
+                     /etc/systemd/system/multi-user.target.wants/lucx-awg-sysctl-guard.path \
+                     /etc/systemd/system/multi-user.target.wants/lucx-awg-readiness.service; do
+            if [[ ! -e "$stage/rollback$entry" && ! -L "$stage/rollback$entry" ]]; then rm -f -- "$entry"; fi
+        done
+        systemctl daemon-reload || true
+        if systemctl is-enabled --quiet lucx-awg-sysctl-guard.path; then
+            systemctl start lucx-awg-sysctl-guard.path 2>/dev/null || true
+        fi
+        ufw reload 2>/dev/null || true
+        nginx -t && systemctl reload nginx || true
+        (( was_active == 0 )) || systemctl start x-ui
+        msg_err 'Модуль AWG в ядре мог быть пересобран; полный backup остаётся в /var/backups/x-ui.'
+        return 1
+    fi
+    printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
+    printf '%s\n' "$script_commit" > "$PREINSTALL_STATE_DIR/pro-commit" || return 1
+    setup_fail2ban || true
+    msg_ok "Совместимость исправлена. Панель: $UPDATE_TARGET. Backup: /var/backups/x-ui."
+)
 
 # ─── AmneziaWG install choice (must be the first install question) ────────────
 choose_amneziawg() {
@@ -960,7 +1258,6 @@ prompt_domain_a_record() {
     done
 }
 choose_webproxy_domain() {
-    AWG_INSTALL_FAILED=0
     [[ "${DEPLOY_TPROXY}" == "1" ]] || return 0
     [[ -n "${IP4:-}" ]] || get_server_ip
     local d p tproxy_autodomain="n"; webproxy_domain=""
@@ -1242,7 +1539,7 @@ def columns(table):
         return {r[1] for r in cur.execute('PRAGMA table_info("%s")' % table)}
     except Exception:
         return set()
-for table in ('client_traffics', 'hosts'):
+for table in ('client_inbounds', 'client_traffics', 'hosts'):
     cols = columns(table)
     if 'inbound_id' in cols:
         for inbound_id in ids:
@@ -1468,72 +1765,202 @@ PY
     msg_ok "Inbound Hysteria2 created (UDP ${hy2_port})."
 }
 
+run_pro_compat() {
+    python3 - "$@" <<'PY_PRO_COMPAT'
+#!/usr/bin/env python3
+"""Local, idempotent Pro migrations. Never resets panel accounts or ports."""
+import argparse
+from contextlib import closing
+import json
+from pathlib import Path
+import re
+import sqlite3
+
+REVISION = '2026.10.04-280.1'
+PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
+
+
+def client_sync_sql():
+    # Rebuild from normalized records, not an email snapshot of a deleted row.
+    rebuild = """UPDATE inbounds SET settings = json_set(
+      CASE WHEN json_valid(settings) THEN settings ELSE '{}' END, '$.clients',
+      json(COALESCE((SELECT json_group_array(json_object(
+        'email', c.email, 'enable', json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)))
+        FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
+        WHERE ci.inbound_id=inbounds.id AND c.email != ''), '[]')))
+      WHERE protocol IN %s""" % PROTOCOLS
+    sql = 'BEGIN IMMEDIATE;\n'
+    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete'):
+        sql += f'DROP TRIGGER IF EXISTS lucx_shareonly_clients_{name};\n'
+    # Old Pro component removals and old archives can leave dangling links.
+    sql += ('DELETE FROM client_inbounds WHERE client_id NOT IN (SELECT id FROM clients) '
+            'OR inbound_id NOT IN (SELECT id FROM inbounds);\n')
+    sql += rebuild + ';\n'
+    for name, event, predicate in (
+        ('ins', 'AFTER INSERT ON client_inbounds', 'id=NEW.inbound_id'),
+        ('del', 'AFTER DELETE ON client_inbounds', 'id=OLD.inbound_id'),
+        ('link_update', 'AFTER UPDATE OF client_id,inbound_id ON client_inbounds',
+         'id IN (OLD.inbound_id,NEW.inbound_id)'),
+        ('client_update', 'AFTER UPDATE OF email,enable ON clients',
+         'id IN (SELECT inbound_id FROM client_inbounds WHERE client_id=NEW.id)'),
+    ):
+        sql += (f'CREATE TRIGGER lucx_shareonly_clients_{name} {event} BEGIN\n'
+                + rebuild + ' AND ' + predicate + ';\nEND;\n')
+    # BEFORE preserves the email until join-delete triggers finish; unrelated
+    # inbounds/clients are never removed. Handles direct SQL component removal too.
+    sql += '''CREATE TRIGGER lucx_shareonly_clients_client_delete BEFORE DELETE ON clients
+      BEGIN DELETE FROM client_inbounds WHERE client_id=OLD.id; END;
+      CREATE TRIGGER lucx_shareonly_clients_inbound_delete BEFORE DELETE ON inbounds
+      BEGIN DELETE FROM client_inbounds WHERE inbound_id=OLD.id; END;
+      COMMIT;'''
+    return sql
+
+
+def sync_clients(db):
+    required = {'clients': {'id', 'email', 'enable'},
+                'client_inbounds': {'client_id', 'inbound_id'},
+                'inbounds': {'id', 'protocol', 'settings'}}
+    for table, columns in required.items():
+        existing = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+        if not columns <= existing:
+            raise RuntimeError(f'Unsupported panel schema: {table}; no migration performed')
+    db.executescript(client_sync_sql())
+
+
+def provider_route(settings):
+    prefix = '/' + settings.get('subClashPath', '/mihomo/').strip('/') + '/'
+    if not re.fullmatch(r'/[A-Za-z0-9_/-]+/', prefix) or '//' in prefix:
+        raise RuntimeError('Unsupported native Clash path')
+    port = int(settings.get('subPort', 2096))
+    if not 1 <= port <= 65535:
+        raise RuntimeError('Invalid subscription port')
+    scheme = 'https' if settings.get('subCertFile') and settings.get('subKeyFile') else 'http'
+    return f'''    # LUCX PRO native provider BEGIN
+    location ~ ^/__lucx_provider/(?<lucx_provider_id>[^/]+)/?$ {{
+        if ($hack = 1) {{ return 404; }}
+        rewrite ^ {prefix}$lucx_provider_id break;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_redirect off;
+        proxy_pass {scheme}://127.0.0.1:{port};
+    }}
+    # LUCX PRO native provider END
+'''
+
+
+def repair_nginx(root, settings):
+    snippet = root / 'etc/nginx/snippets/includes.conf'
+    template = root / 'var/www/subpage/clash.yaml.tpl'
+    if template.is_file():
+        text = template.read_text(encoding='utf-8')
+        text, count = re.subn(
+            r'(?m)^(    url: https://[^/\s]+)/[^/\s]+/\$\{SUB_ID\}\?provider=1$',
+            r'\1/__lucx_provider/${SUB_ID}', text)
+        if not count and '/__lucx_provider/${SUB_ID}' not in text:
+            raise RuntimeError('Unknown Clash provider URL; refusing to guess')
+        if not snippet.is_file():
+            raise RuntimeError('Clash nginx snippet is missing')
+        route = provider_route(settings)
+        original = snippet.read_text(encoding='utf-8')
+        cleaned = re.sub(r'    # LUCX PRO native provider BEGIN\n.*?    # LUCX PRO native provider END\n',
+                         '', original, flags=re.S)
+        snippet.write_text(route + cleaned, encoding='utf-8')
+        template.write_text(text, encoding='utf-8')
+    # Match only the saved panel port; Xray inbound HTTP proxies remain HTTP.
+    panel_port = int(settings.get('webPort', 54321))
+    scheme = 'https' if settings.get('webCertFile') and settings.get('webKeyFile') else 'http'
+    for path in (root / 'etc/nginx/sites-available').glob('*.conf'):
+        text = path.read_text(encoding='utf-8')
+        repaired = re.sub(r'proxy_pass https?://127\.0\.0\.1:' + str(panel_port) + r'(?=[/;])',
+                          f'proxy_pass {scheme}://127.0.0.1:{panel_port}', text)
+        if repaired != text:
+            path.write_text(repaired, encoding='utf-8')
+
+
+def remove_forwarding_override(root):
+    path = root / 'etc/sysctl.d/99-lucx-ui-forwarding.conf'
+    if not path.is_file():
+        return
+    text = path.read_text(encoding='utf-8')
+    text = re.sub(r'(?m)^\s*net\.ipv4\.ip_forward\s*=\s*1\s*(?:#.*)?\n?', '', text)
+    if any(line.strip() and not line.lstrip().startswith('#') for line in text.splitlines()):
+        path.write_text(text, encoding='utf-8')
+    else:
+        path.unlink()
+    # Do not write ip_forward=0: active panel tunnels own runtime forwarding.
+
+
+def migrate(root, clients_only=False):
+    with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db, db:
+        sync_clients(db)
+        if clients_only:
+            return
+        settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
+        repair_nginx(root, settings)
+        for row_id, raw in db.execute("SELECT id,settings FROM inbounds WHERE protocol='csqtt'").fetchall():
+            data = json.loads(raw)
+            data['routeThroughXray'] = False
+            db.execute('UPDATE inbounds SET settings=? WHERE id=?',
+                       (json.dumps(data, ensure_ascii=False), row_id))
+        db.commit()
+    remove_forwarding_override(root)
+
+
+def inspect(root):
+    path = root / 'etc/x-ui/x-ui.db'
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+        print('Инбаунды:', ', '.join(f'{p}={n}' for p, n in db.execute(
+            'SELECT protocol,COUNT(*) FROM inbounds GROUP BY protocol')))
+        for row_id, protocol, raw in db.execute(
+                "SELECT id,protocol,settings FROM inbounds WHERE protocol IN ('csqtt','qwdtt','tproxy','amneziawg')"):
+            data = json.loads(raw)
+            config = data.get('server', data) if protocol == 'amneziawg' else data
+            default = protocol == 'qwdtt'
+            route = config.get('routeThroughXray', default)
+            change = ' → false (штатный direct)' if protocol == 'csqtt' else ' (сохраняется)'
+            print(f'{protocol} #{row_id}: routeThroughXray={route}{change}')
+        triggers = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'lucx_shareonly_%'")]
+        print('Синхронизация клиентов:', ', '.join(triggers) or 'отсутствует')
+        dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
+                              '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        print('Осиротевшие связи:', dangling)
+    for name, relative in (
+        ('AWG guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
+        ('Clash renderer', 'etc/systemd/system/lucx-clash-sub.service'),
+        ('AdGuard', 'opt/AdGuardHome'), ('RKN guard', 'usr/local/bin/rkn-guard'),
+        ('BBR панели', 'etc/sysctl.d/99-bbr-x-ui.conf'),
+        ('Pro ip_forward override', 'etc/sysctl.d/99-lucx-ui-forwarding.conf'),
+        ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
+    ):
+        print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
+    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard.')
+    print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
+    print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall'))
+    parser.add_argument('--root', type=Path, default=Path('/'))
+    args = parser.parse_args()
+    root = args.root.resolve()
+    if args.action == 'firewall':
+        remove_forwarding_override(root)
+    elif args.action == 'report':
+        inspect(root)
+    else:
+        migrate(root, args.action == 'clients')
+
+
+if __name__ == '__main__':
+    main()
+PY_PRO_COMPAT
+}
+
 install_shareonly_client_sync() {
-    [[ ! -f $XUIDB ]] && return 0
-    sqlite3 -bail -cmd ".timeout 30000" "$XUIDB" <<'SQL'
-BEGIN IMMEDIATE;
-UPDATE inbounds
-SET settings = json_set(
-  CASE WHEN json_valid(settings) THEN settings ELSE '{}' END,
-  '$.clients',
-  CASE WHEN json_type(json_extract(settings, '$.clients')) = 'array'
-       THEN json_extract(settings, '$.clients')
-       ELSE json('[]') END
-)
-WHERE protocol IN ('qwdtt','csqtt','tproxy');
-DROP TRIGGER IF EXISTS lucx_shareonly_clients_ins;
-DROP TRIGGER IF EXISTS lucx_shareonly_clients_del;
-CREATE TRIGGER lucx_shareonly_clients_ins
-AFTER INSERT ON client_inbounds
-WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = NEW.inbound_id AND protocol IN ('qwdtt','csqtt','tproxy'))
-BEGIN
-  UPDATE inbounds SET settings = json_insert(
-    json_set(
-      settings,
-      '$.clients',
-      CASE WHEN json_type(json_extract(settings, '$.clients')) = 'array'
-           THEN json_extract(settings, '$.clients')
-           ELSE json('[]') END
-    ),
-    '$.clients[#]',
-    json_object(
-      'email', COALESCE((SELECT email FROM clients WHERE id = NEW.client_id), ''),
-      'enable', json('true')
-    )
-  )
-  WHERE id = NEW.inbound_id
-    AND COALESCE((SELECT email FROM clients WHERE id = NEW.client_id), '') != ''
-    AND NOT EXISTS (
-      SELECT 1 FROM json_each(
-        CASE WHEN json_type(json_extract(inbounds.settings, '$.clients')) = 'array'
-             THEN json_extract(inbounds.settings, '$.clients')
-             ELSE json('[]') END
-      )
-      WHERE json_extract(value, '$.email') = (SELECT email FROM clients WHERE id = NEW.client_id)
-    );
-END;
-CREATE TRIGGER lucx_shareonly_clients_del
-AFTER DELETE ON client_inbounds
-WHEN EXISTS (SELECT 1 FROM inbounds WHERE id = OLD.inbound_id AND protocol IN ('qwdtt','csqtt','tproxy'))
-BEGIN
-  UPDATE inbounds SET settings = json_set(
-    settings,
-    '$.clients',
-    (
-      SELECT json_group_array(json(value))
-      FROM json_each(
-        CASE WHEN json_type(json_extract(inbounds.settings, '$.clients')) = 'array'
-             THEN json_extract(inbounds.settings, '$.clients')
-             ELSE json('[]') END
-      )
-      WHERE json_extract(value, '$.email') != (SELECT email FROM clients WHERE id = OLD.client_id)
-         OR (SELECT email FROM clients WHERE id = OLD.client_id) IS NULL
-    )
-  )
-  WHERE id = OLD.inbound_id;
-END;
-COMMIT;
-SQL
+    [[ ! -f "$XUIDB" ]] && return 0
+    run_pro_compat clients
 }
 
 insert_extra_inbound() {
@@ -1580,7 +2007,7 @@ else:
         "subHost": sub_host,
         "vkHashes": "",
         "configDir": "",
-        "routeThroughXray": True,
+        "routeThroughXray": False,
         "outboundTag": ""
     }
 stream = {"security": "none"}
@@ -2254,7 +2681,8 @@ fi
 # A normal repeated full installation must start from the same clean state as
 # an explicit "-uninstall y". Component-only maintenance commands are excluded.
 is_full_install_request() {
-    [[ "${ADGUARD_ONLY}" != "y" &&
+    [[ "${UPDATE_COMPAT}" != "y" && "${CHECK_COMPAT}" != "y" &&
+       "${ADGUARD_ONLY}" != "y" &&
        "${ADGUARD_UNINSTALL}" != "y" &&
        "${RKN_GUARD_ONLY}" != "y" &&
        "${RKN_GUARD_UNINSTALL}" != "y" &&
@@ -2450,7 +2878,7 @@ validate_domains() {
     fi
 }
 # First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
-if [[ "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
+if [[ "${UPDATE_COMPAT}" != "y" && "${CHECK_COMPAT}" != "y" && "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
     choose_auto_domains || exit 1
     validate_domains || exit 1
 fi
@@ -2631,6 +3059,17 @@ EOF
 
     # Shared proxy locations for xray inbounds (included by both vhosts)
     cat > /etc/nginx/snippets/includes.conf <<EOF
+    # LUCX PRO native provider BEGIN
+    location ~ ^/__lucx_provider/(?<lucx_provider_id>[^/]+)/?\$ {
+        if (\$hack = 1) { return 404; }
+        rewrite ^ /mihomo/\$lucx_provider_id break;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_redirect off;
+        proxy_pass https://127.0.0.1:${sub_port};
+    }
+    # LUCX PRO native provider END
     # Dedicated Clash link displayed by the panel uses the same YAML renderer.
     location ~ ^/mihomo/(?<panel_clash_sub_id>[^/]+)/?\$ {
         if (\$hack = 1) { return 404; }
@@ -2839,14 +3278,14 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_pass http://127.0.0.1:${panel_port};
+        proxy_pass https://127.0.0.1:${panel_port};
     }
     location /${panel_path} {
         proxy_redirect off;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_pass http://127.0.0.1:${panel_port};
+        proxy_pass https://127.0.0.1:${panel_port};
     }
 
     location = /__lucx_clash {
@@ -2881,14 +3320,9 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 _arch() {
     case "$(uname -m)" in
-        x86_64|x64|amd64)          echo 'amd64'  ;;
-        i*86|x86)                  echo '386'    ;;
-        armv8*|armv8|arm64|aarch64) echo 'arm64' ;;
-        armv7*|armv7|arm)          echo 'armv7'  ;;
-        armv6*|armv6)              echo 'armv6'  ;;
-        armv5*|armv5)              echo 'armv5'  ;;
-        s390x)                     echo 's390x'  ;;
-        *) echo "Unsupported CPU architecture!" && exit 1 ;;
+        x86_64|x64|amd64) echo 'amd64' ;;
+        armv8*|arm64|aarch64) echo 'arm64' ;;
+        *) msg_err "LucX release supports Linux amd64/arm64 only." >&2; return 1 ;;
     esac
 }
 
@@ -2925,6 +3359,7 @@ install_panel() {
     local tag_version dest script_ref GH RAW release_url
     GH='https://github.com'
     RAW='https://raw.githubusercontent.com'
+    _arch >/dev/null || return 1
     apt-get update && apt-get install -y -q wget curl tar tzdata
     cd /usr/local/
     if [[ -n "$PANEL_VERSION" && "$PANEL_VERSION" != "latest" ]]; then
@@ -3301,7 +3736,7 @@ proxy-providers:
   sub:
     type: http
     proxy: DIRECT
-    url: https://${DOMAIN}/${SUB_PATH}/${SUB_ID}?provider=1
+    url: https://${DOMAIN}/__lucx_provider/${SUB_ID}
     path: ./proxy_providers/${DOMAIN}_${SUB_PATH}_${SUB_ID}.yaml
     interval: 3600
     override:
@@ -3592,104 +4027,92 @@ import subprocess
 import tempfile
 import time
 
-REV = 'udp-api-2'
+REV = 'upstream-udp-280-1'
 MARKER = Path('/etc/x-ui/.lucx-awg-compat-version')
 REPORT = Path('/var/lib/lucx-ui-pro/awg-readiness.json')
 SELF = '/usr/local/lib/lucx-ui-pro/awg-compat.py'
 
-PROBE = r'''/* Compile against the target kernel, without compat.h. */
-#ifndef KBUILD_MODNAME
-#define KBUILD_MODNAME "lucx_udp_probe"
-#endif
-#ifndef KBUILD_BASENAME
-#define KBUILD_BASENAME "lucx_udp_probe"
-#endif
-#ifndef MODULE
-#define MODULE 1
-#endif
-#include <linux/kconfig.h>
-#include <net/udp_tunnel.h>
-#ifdef LUCX_PROBE_SOCK
-#define LUCX_ARG struct sock *
-#else
-#define LUCX_ARG struct socket *
-#endif
-#ifdef LUCX_PROBE_SETUP
-_Static_assert(__builtin_types_compatible_p(typeof(&setup_udp_tunnel_sock),
-    void (*)(struct net *, LUCX_ARG, struct udp_tunnel_sock_cfg *)),
-    "setup_udp_tunnel_sock: incompatible signature");
-#else
-_Static_assert(__builtin_types_compatible_p(typeof(&udp_tunnel_sock_release),
-    void (*)(LUCX_ARG)), "udp_tunnel_sock_release: incompatible signature");
-#endif
-'''
-
-KBUILD = r'''
-# LUCX UDP API: feature probes run again for each DKMS target kernel.
-# modpost also reads Kbuild, but has no compiler/include context. Probe only
-# while Makefile.build is compiling objects; modpost needs no ccflags.
-ifneq ($(filter %/Makefile.build,$(MAKEFILE_LIST)),)
-lucx-udp-probe = $(call try-run,$(CC) $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS) $(LINUXINCLUDE) -DLUCX_PROBE_$(1) -DLUCX_PROBE_$(2) -x c -c $(kbuild-dir)/compat/lucx_udp_probe.c -o "$$TMP",y,n)
-ifeq ($(call lucx-udp-probe,SETUP,SOCK),y)
-ccflags-y += -DLUCX_UDP_SETUP_SOCK
-else ifeq ($(call lucx-udp-probe,SETUP,SOCKET),y)
-ccflags-y += -DLUCX_UDP_SETUP_SOCKET
-else
-$(error LucX AWG: cannot detect setup_udp_tunnel_sock ABI; check target headers/compiler)
-endif
-ifeq ($(call lucx-udp-probe,RELEASE,SOCK),y)
-ccflags-y += -DLUCX_UDP_RELEASE_SOCK
-else ifeq ($(call lucx-udp-probe,RELEASE,SOCKET),y)
-ccflags-y += -DLUCX_UDP_RELEASE_SOCKET
-else
-$(error LucX AWG: cannot detect udp_tunnel_sock_release ABI; check target headers/compiler)
-endif
-endif
-'''
-
-COMPAT = r'''/* LUCX UDP API: use the signatures detected against target headers. */
-#include <net/udp_tunnel.h>
-#if defined(LUCX_UDP_SETUP_SOCKET)
-#define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, (sk)->sk_socket, sock_cfg)
-#elif !defined(LUCX_UDP_SETUP_SOCK)
-#error "LucX AWG: setup UDP ABI not detected"
-#endif
-#if defined(LUCX_UDP_RELEASE_SOCKET)
-#define udp_tunnel_sock_release(sk) udp_tunnel_sock_release((sk)->sk_socket)
-#elif !defined(LUCX_UDP_RELEASE_SOCK)
-#error "LucX AWG: release UDP ABI not detected"
-#endif
-'''
-
-def patch_source(directory):
-    src = Path(directory)
-    header = src / 'compat/compat.h'
-    build = src / 'Kbuild'
-    text, kb = header.read_text(), build.read_text()
-    dkms = src / 'dkms.conf'
-    data = dkms.read_text()
-    make_line = 'MAKE[0]="make KERNELRELEASE=${kernelver} WIREGUARD_VERSION=${PACKAGE_VERSION}"\n'
-    if '/* LUCX UDP API:' in text:
-        if COMPAT not in text or KBUILD not in kb or (src / 'compat/lucx_udp_probe.c').read_text() != PROBE or make_line not in data:
-            raise RuntimeError('Unknown/incomplete LucX UDP patch; refusing to guess')
-        return
-    old = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
+# Exact upstream function from LucX 279/280. Used only to retire old Pro
+# wrappers in restored/previously patched installers; fresh stock retains it.
+# Copyright (c) 2025 LucX-UI Project; PolyForm Noncommercial 1.0.0.
+UPSTREAM_UDP_FUNCTION = r'''apply_udp_tunnel_abi_compat() {
+    local f="${1:-compat/compat.h}"
+    if grep -qF 'wg_setup_udp_tunnel_sock' "$f" 2>/dev/null; then
+        echo -e "${GREEN}udp_tunnel ABI wrappers already in tree — skip.${NC}"
+        return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${YELLOW}python3 нет — патч udp_tunnel ABI пропущен (ядра с backport-ABI не соберутся).${NC}"
+        return 0
+    fi
+    echo -e "${YELLOW}Патч udp_tunnel ABI (детект сигнатуры вместо версии)...${NC}"
+    python3 - "$f" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8", errors="surrogateescape").read()
+needle = """\
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
 #include <net/udp_tunnel.h>
 #define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, sk->sk_socket, sock_cfg)
 #define udp_tunnel_sock_release(sk) udp_tunnel_sock_release(sk->sk_socket)
 #endif
-'''
-    if text.count(old) != 1 or 'include $(src)/compat/Kbuild.include' not in kb:
-        raise RuntimeError('Unsupported upstream UDP compat layout; sources not changed')
-    sock = (src / 'socket.c').read_text()
-    if 'setup_udp_tunnel_sock(net, new4->sk, &cfg)' not in sock:
-        raise RuntimeError('Unsupported upstream socket calls; sources not changed')
+"""
+dispatch = """\
+/*
+ * Linux 7.1.5 changed udp_tunnel_sock_release()/setup_udp_tunnel_sock() from
+ * struct socket * to struct sock *, but distros backport the new ABI below
+ * that version (Ubuntu generic 7.0.0-38, Debian 13 7.1.7+deb13), so
+ * LINUX_VERSION_CODE cannot detect it. Probe the real signature at compile
+ * time instead; call sites in socket.c already pass struct sock *.
+ * From amneziawg-linux-kernel-module PR #218, adapted. LucX-UI patch.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
+#include <net/udp_tunnel.h>
+
+static inline void wg_udp_tunnel_sock_release(struct sock *sk)
+{
+	if (__builtin_types_compatible_p(typeof(&udp_tunnel_sock_release), void (*)(struct sock *)))
+		((void (*)(struct sock *))udp_tunnel_sock_release)(sk);
+	else
+		((void (*)(struct socket *))udp_tunnel_sock_release)(sk->sk_socket);
+}
+
+static inline void wg_setup_udp_tunnel_sock(struct net *net, struct sock *sk,
+					    struct udp_tunnel_sock_cfg *cfg)
+{
+	if (__builtin_types_compatible_p(typeof(&setup_udp_tunnel_sock),
+					 void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *)))
+		((void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk, cfg);
+	else
+		((void (*)(struct net *, struct socket *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk->sk_socket, cfg);
+}
+
+/* Macros come AFTER the wrapper bodies: inside a wrapper the raw symbol
+ * must still resolve to the real kernel function, not to itself. */
+#define setup_udp_tunnel_sock(net, sk, sock_cfg) wg_setup_udp_tunnel_sock(net, sk, sock_cfg)
+#define udp_tunnel_sock_release(sk) wg_udp_tunnel_sock_release(sk)
+#endif
+"""
+if needle not in text:
+    sys.stderr.write("udp_tunnel ABI: version-gated block not found in compat.h\n")
+    sys.exit(1)
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(text.replace(needle, dispatch, 1))
+PY
+}'''
+
+def patch_source(directory):
+    """Retain upstream ABI patches; stamp DKMS builds with the actual version."""
+    src = Path(directory)
+    dkms = src / 'dkms.conf'
+    data = dkms.read_text()
+    make_line = 'MAKE[0]="make KERNELRELEASE=${kernelver} WIREGUARD_VERSION=${PACKAGE_VERSION}"\n'
+    if make_line in data:
+        return
     if re.search(r'(?m)^MAKE\[', data):
-        raise RuntimeError('Unexpected upstream DKMS MAKE override; sources not changed')
-    header.write_text(text.replace(old, COMPAT))
-    build.write_text(kb + KBUILD)
-    (src / 'compat/lucx_udp_probe.c').write_text(PROBE)
+        raise RuntimeError('Unknown DKMS MAKE override; sources not changed')
+    # No edits to compat.h/Kbuild/socket.c: upstream owns all kernel ABI fixes.
     dkms.write_text(data + '\n' + make_line)
+
 
 def run(*args, timeout=30):
     try:
@@ -3722,35 +4145,44 @@ def needs_rebuild():
     if not MARKER.is_file() or MARKER.read_text().strip() != REV:
         return True
     current = os.uname().release
-    return any('-lucxudp2' not in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout
+    return any('-lucxpro280' not in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout
                for k in kernels() if not archived_without_headers(k, current))
 
 def patch_installer(file):
     path = Path(file)
     text = path.read_text(encoding='utf-8')
-    if '# LUCX UDP installer udp-api-1' in text:
-        text = text.replace('# LUCX UDP installer udp-api-1', '# LUCX UDP installer udp-api-2')
-        text = text.replace('MOD_VER="${MOD_VER}-lucxudp1"', 'MOD_VER="${MOD_VER}-lucxudp2"')
-        path.write_text(text, encoding='utf-8')
+    marker = '# LUCX AWG installer upstream-udp-280-1'
+    if marker in text:
+        if UPSTREAM_UDP_FUNCTION not in text or '    python3 ' + SELF + ' patch-source "$PWD" || exit 1\n' not in text:
+            raise RuntimeError('Incomplete Pro DKMS identity patch')
         return
-    if '# LUCX UDP installer udp-api-2' in text:
-        return
+    legacy = bool(re.search(r'# LUCX UDP installer udp-api-[12]', text))
     start = text.find('apply_udp_tunnel_abi_compat() {')
-    end = text.find('\nPY\n}\n', start)
-    if end >= 0:
-        end += len('\nPY')
+    if start < 0:
+        raise RuntimeError('Unsupported LucX installer; no changes made')
+    if legacy:
+        end = text.find('\n}\n', start)
+        if end < 0 or ' patch-source "$PWD"' not in text[start:end]:
+            raise RuntimeError('Unknown legacy Pro UDP wrapper; no changes made')
+        # Old Pro replaced the upstream function; restore the exact 279/280 fix.
+        text = text[:start] + UPSTREAM_UDP_FUNCTION + text[end + len('\n}'):]
+        text = re.sub(r'# LUCX UDP installer udp-api-[12]\nif \[\[.*?\nfi\n(?=# Skip DKMS/kernel when the installed module SHA)',
+                      '', text, flags=re.S)
+        text = re.sub(r'(?m)^    MOD_VER="\$\{MOD_VER\}-lucxudp[12]"\n', '', text)
+    else:
+        end = text.find('\nPY\n}\n', start)
+        block = text[start:end] if end >= 0 else ''
+        if '__builtin_types_compatible_p' not in block or 'wg_setup_udp_tunnel_sock' not in block:
+            raise RuntimeError('Installer lacks the upstream UDP signature fix; no changes made')
     gate = '# Skip DKMS/kernel when the installed module SHA'
-    call = '    apply_udp_tunnel_abi_compat socket.c || \\\n'
-    if start < 0 or end < 0 or text.count(gate) != 1 or text.count(call) != 1:
+    pattern = r'    apply_udp_tunnel_abi_compat (?:socket\.c|compat/compat\.h) \|\| (?:' + re.escape(chr(92)) + r'\n[^\n]*|exit 1)\n'
+    if text.count(gate) != 1 or len(list(re.finditer(pattern, text))) != 1:
         raise RuntimeError('Unsupported LucX installer layout; no changes made')
-    # An unknown source patch must fail, rather than continuing without compat.
-    tail = text[end + 3:]
-    replacement = f'''apply_udp_tunnel_abi_compat() {{
-    python3 {SELF} patch-source "$PWD"
-}}
-'''
-    text = text[:start] + replacement + tail
-    text = text.replace(gate, f'''# LUCX UDP installer udp-api-2
+    text = re.sub(pattern,
+                  '    MOD_VER="${MOD_VER}-lucxpro280"\n'
+                  f'    python3 {SELF} patch-source "$PWD" || exit 1\n'
+                  '    apply_udp_tunnel_abi_compat compat/compat.h || exit 1\n', text, count=1)
+    text = text.replace(gate, f'''{marker}
 if [[ "$DO_UNINSTALL" -ne 1 ]]; then
     if python3 {SELF} needs-rebuild; then FORCE_REBUILD=1; fi
     trap 'lucx_rc=$?; lucx_ready_rc=0; python3 {SELF} ready --installed --installer-exit "$lucx_rc" || lucx_ready_rc=$?; if [[ "$lucx_rc" -eq 0 ]]; then lucx_rc=$lucx_ready_rc; fi; exit "$lucx_rc"' EXIT
@@ -3758,16 +4190,12 @@ fi
 {gate}''', 1)
     uninstall = 'if [[ $DO_UNINSTALL -eq 1 ]]; then\n'
     if text.count(uninstall) != 1:
-        raise RuntimeError('Unsupported LucX uninstall branch; no changes made')
-    text = text.replace(uninstall, uninstall +
-                        f"    trap 'lucx_rc=$?; if [[ \"$lucx_rc\" -eq 0 ]]; then python3 {SELF} cleanup; fi; exit \"$lucx_rc\"' EXIT\n", 1)
-    # Locate the call and its warning continuation, preserving following code.
-    text = re.sub(r'    apply_udp_tunnel_abi_compat socket\.c \|\| \\\n[^\n]*\n',
-                  '    MOD_VER="${MOD_VER}-lucxudp2"\n'
-                  '    apply_udp_tunnel_abi_compat socket.c || exit 1\n', text, count=1)
-    text = text.replace('=== Установка AWG завершена ===', '=== Штатная установка AWG завершена; проверяем готовность ===')
-    # Keep the marker tied to successful patched sources, not just a loaded old module.
+        raise RuntimeError('Unsupported uninstall branch; no changes made')
+    if not legacy:
+        text = text.replace(uninstall, uninstall +
+                            f"    trap 'lucx_rc=$?; if [[ \"$lucx_rc\" -eq 0 ]]; then python3 {SELF} cleanup; fi; exit \"$lucx_rc\"' EXIT\n", 1)
     path.write_text(text, encoding='utf-8')
+
 
 def ready(installed=False, next_kernel=None, installer_exit=None):
     current = os.uname().release
@@ -3776,7 +4204,7 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
         if not re.fullmatch(r'[0-9][A-Za-z0-9._+-]{0,127}', next_kernel):
             raise ValueError('Invalid next kernel release')
         targets.add(next_kernel)
-    results = {k: '-lucxudp2' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
+    results = {k: '-lucxpro280' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
     archived = [k for k, ok in results.items() if not ok and archived_without_headers(k, current, next_kernel)]
     required = {k: ok for k, ok in results.items() if k not in archived}
     tools = all(shutil.which(t) for t in ('awg', 'awg-quick', 'ip'))
@@ -3830,11 +4258,11 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     active_file = Path('/sys/module/amneziawg/version')
     active_version = active_file.read_text().strip() if active_file.is_file() else ''
     replacement_active = bool(active_version and active_version == disk_version)
-    if reboot_pending and replacement_active and '-lucxudp2' in disk_version and all(required.values()):
+    if reboot_pending and replacement_active and '-lucxpro280' in disk_version and all(required.values()):
         reboot_flag.unlink()
         reboot_pending = False
     local_ready = local_ready and replacement_active and not reboot_pending and installer_exit in (None, 0)
-    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxudp2' in disk_version:
+    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
         MARKER.parent.mkdir(parents=True, exist_ok=True)
         MARKER.write_text(REV + '\n')
     dns = run('getent', 'ahostsv4', 'example.org', timeout=8).returncode == 0
@@ -4169,7 +4597,10 @@ install_awg_kernel() {
     sanitize_awg_sysctl_file
 
     msg_inf "Installing AmneziaWG kernel module/tools via bundled LucX installer..."
-    if ! bash "$script"; then
+    local -a awg_install_args=()
+    # Maintenance must not silently upgrade the VPS kernel.
+    [[ "${UPDATE_COMPAT:-}" != "y" ]] || awg_install_args+=(--no-kernel-upgrade)
+    if ! bash "$script" "${awg_install_args[@]}"; then
         msg_err "AmneziaWG installation failed; panel installation will continue, but AWG may be unavailable."
         AWG_INSTALL_FAILED=1
         return 0
@@ -4548,12 +4979,9 @@ setup_cron() {
 # ─────────────────────────────────────────────────────────────────────────────
 setup_firewall() {
     ufw disable
-    # Enable kernel forwarding and UFW routed traffic for all installations,
-    # not only when a particular tunnel inbound was selected.
-    cat > /etc/sysctl.d/99-lucx-ui-forwarding.conf <<'EOF'
-net.ipv4.ip_forward=1
-EOF
-    sysctl -w net.ipv4.ip_forward=1 >/dev/null
+    # The panel owns runtime forwarding; retire only the old Pro override.
+    run_pro_compat firewall || return 1
+    # Keep allow routed for AWG/QWDTT with UFW; CSQTT owns its own rules.
     ufw default deny incoming
     ufw default allow outgoing
     ufw default allow routed
@@ -4701,6 +5129,7 @@ main() {
     # The installation is now complete. Remove the crash-recovery marker before
     # the optional AWG reboot prompt so a manual rerun never repeats cleanup.
     clear_install_in_progress
+    printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
     if [[ "${DEPLOY_AWG}" == "y" ]]; then
         # The installer already printed the AWG report. Keep this final check
         # silent so panel/Telegram credentials remain the final results screen.
@@ -4714,9 +5143,14 @@ main() {
     fi
 }
 
-if ! is_full_install_request && [[ ! -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]]; then
+if ! is_full_install_request && [[ "$CHECK_COMPAT" != y && ! -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]]; then
     msg_err "Component maintenance requires an installation owned by this script."
     exit 1
+fi
+
+if [[ "${UPDATE_COMPAT}" == "y" || "${CHECK_COMPAT}" == "y" ]]; then
+    update_compatibility
+    exit $?
 fi
 
 if [[ "${TG_WEB_PROXY_UNINSTALL}" == "y" ]]; then

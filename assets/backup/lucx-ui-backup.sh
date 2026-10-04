@@ -190,7 +190,7 @@ cmd_backup() {
 
     # ── metadata ──────────────────────────────────────────────────────────
     local xui_ver awg_installed
-    xui_ver=$(/usr/local/x-ui/x-ui -v 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    xui_ver=$(/usr/local/x-ui/x-ui -v 2>/dev/null | grep -oP 'v?\d+\.\d+\.\d+(?:-lucx\.\d+)?' | head -1 || echo "unknown")
     if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/modules-load.d/amneziawg.conf ]] || [[ -f /etc/x-ui/.awg-module-version ]]; then
         awg_installed=1
     else
@@ -238,104 +238,92 @@ import subprocess
 import tempfile
 import time
 
-REV = 'udp-api-2'
+REV = 'upstream-udp-280-1'
 MARKER = Path('/etc/x-ui/.lucx-awg-compat-version')
 REPORT = Path('/var/lib/lucx-ui-pro/awg-readiness.json')
 SELF = '/usr/local/lib/lucx-ui-pro/awg-compat.py'
 
-PROBE = r'''/* Compile against the target kernel, without compat.h. */
-#ifndef KBUILD_MODNAME
-#define KBUILD_MODNAME "lucx_udp_probe"
-#endif
-#ifndef KBUILD_BASENAME
-#define KBUILD_BASENAME "lucx_udp_probe"
-#endif
-#ifndef MODULE
-#define MODULE 1
-#endif
-#include <linux/kconfig.h>
-#include <net/udp_tunnel.h>
-#ifdef LUCX_PROBE_SOCK
-#define LUCX_ARG struct sock *
-#else
-#define LUCX_ARG struct socket *
-#endif
-#ifdef LUCX_PROBE_SETUP
-_Static_assert(__builtin_types_compatible_p(typeof(&setup_udp_tunnel_sock),
-    void (*)(struct net *, LUCX_ARG, struct udp_tunnel_sock_cfg *)),
-    "setup_udp_tunnel_sock: incompatible signature");
-#else
-_Static_assert(__builtin_types_compatible_p(typeof(&udp_tunnel_sock_release),
-    void (*)(LUCX_ARG)), "udp_tunnel_sock_release: incompatible signature");
-#endif
-'''
-
-KBUILD = r'''
-# LUCX UDP API: feature probes run again for each DKMS target kernel.
-# modpost also reads Kbuild, but has no compiler/include context. Probe only
-# while Makefile.build is compiling objects; modpost needs no ccflags.
-ifneq ($(filter %/Makefile.build,$(MAKEFILE_LIST)),)
-lucx-udp-probe = $(call try-run,$(CC) $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS) $(LINUXINCLUDE) -DLUCX_PROBE_$(1) -DLUCX_PROBE_$(2) -x c -c $(kbuild-dir)/compat/lucx_udp_probe.c -o "$$TMP",y,n)
-ifeq ($(call lucx-udp-probe,SETUP,SOCK),y)
-ccflags-y += -DLUCX_UDP_SETUP_SOCK
-else ifeq ($(call lucx-udp-probe,SETUP,SOCKET),y)
-ccflags-y += -DLUCX_UDP_SETUP_SOCKET
-else
-$(error LucX AWG: cannot detect setup_udp_tunnel_sock ABI; check target headers/compiler)
-endif
-ifeq ($(call lucx-udp-probe,RELEASE,SOCK),y)
-ccflags-y += -DLUCX_UDP_RELEASE_SOCK
-else ifeq ($(call lucx-udp-probe,RELEASE,SOCKET),y)
-ccflags-y += -DLUCX_UDP_RELEASE_SOCKET
-else
-$(error LucX AWG: cannot detect udp_tunnel_sock_release ABI; check target headers/compiler)
-endif
-endif
-'''
-
-COMPAT = r'''/* LUCX UDP API: use the signatures detected against target headers. */
-#include <net/udp_tunnel.h>
-#if defined(LUCX_UDP_SETUP_SOCKET)
-#define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, (sk)->sk_socket, sock_cfg)
-#elif !defined(LUCX_UDP_SETUP_SOCK)
-#error "LucX AWG: setup UDP ABI not detected"
-#endif
-#if defined(LUCX_UDP_RELEASE_SOCKET)
-#define udp_tunnel_sock_release(sk) udp_tunnel_sock_release((sk)->sk_socket)
-#elif !defined(LUCX_UDP_RELEASE_SOCK)
-#error "LucX AWG: release UDP ABI not detected"
-#endif
-'''
-
-def patch_source(directory):
-    src = Path(directory)
-    header = src / 'compat/compat.h'
-    build = src / 'Kbuild'
-    text, kb = header.read_text(), build.read_text()
-    dkms = src / 'dkms.conf'
-    data = dkms.read_text()
-    make_line = 'MAKE[0]="make KERNELRELEASE=${kernelver} WIREGUARD_VERSION=${PACKAGE_VERSION}"\n'
-    if '/* LUCX UDP API:' in text:
-        if COMPAT not in text or KBUILD not in kb or (src / 'compat/lucx_udp_probe.c').read_text() != PROBE or make_line not in data:
-            raise RuntimeError('Unknown/incomplete LucX UDP patch; refusing to guess')
-        return
-    old = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
+# Exact upstream function from LucX 279/280. Used only to retire old Pro
+# wrappers in restored/previously patched installers; fresh stock retains it.
+# Copyright (c) 2025 LucX-UI Project; PolyForm Noncommercial 1.0.0.
+UPSTREAM_UDP_FUNCTION = r'''apply_udp_tunnel_abi_compat() {
+    local f="${1:-compat/compat.h}"
+    if grep -qF 'wg_setup_udp_tunnel_sock' "$f" 2>/dev/null; then
+        echo -e "${GREEN}udp_tunnel ABI wrappers already in tree — skip.${NC}"
+        return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${YELLOW}python3 нет — патч udp_tunnel ABI пропущен (ядра с backport-ABI не соберутся).${NC}"
+        return 0
+    fi
+    echo -e "${YELLOW}Патч udp_tunnel ABI (детект сигнатуры вместо версии)...${NC}"
+    python3 - "$f" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8", errors="surrogateescape").read()
+needle = """\
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
 #include <net/udp_tunnel.h>
 #define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, sk->sk_socket, sock_cfg)
 #define udp_tunnel_sock_release(sk) udp_tunnel_sock_release(sk->sk_socket)
 #endif
-'''
-    if text.count(old) != 1 or 'include $(src)/compat/Kbuild.include' not in kb:
-        raise RuntimeError('Unsupported upstream UDP compat layout; sources not changed')
-    sock = (src / 'socket.c').read_text()
-    if 'setup_udp_tunnel_sock(net, new4->sk, &cfg)' not in sock:
-        raise RuntimeError('Unsupported upstream socket calls; sources not changed')
+"""
+dispatch = """\
+/*
+ * Linux 7.1.5 changed udp_tunnel_sock_release()/setup_udp_tunnel_sock() from
+ * struct socket * to struct sock *, but distros backport the new ABI below
+ * that version (Ubuntu generic 7.0.0-38, Debian 13 7.1.7+deb13), so
+ * LINUX_VERSION_CODE cannot detect it. Probe the real signature at compile
+ * time instead; call sites in socket.c already pass struct sock *.
+ * From amneziawg-linux-kernel-module PR #218, adapted. LucX-UI patch.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
+#include <net/udp_tunnel.h>
+
+static inline void wg_udp_tunnel_sock_release(struct sock *sk)
+{
+	if (__builtin_types_compatible_p(typeof(&udp_tunnel_sock_release), void (*)(struct sock *)))
+		((void (*)(struct sock *))udp_tunnel_sock_release)(sk);
+	else
+		((void (*)(struct socket *))udp_tunnel_sock_release)(sk->sk_socket);
+}
+
+static inline void wg_setup_udp_tunnel_sock(struct net *net, struct sock *sk,
+					    struct udp_tunnel_sock_cfg *cfg)
+{
+	if (__builtin_types_compatible_p(typeof(&setup_udp_tunnel_sock),
+					 void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *)))
+		((void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk, cfg);
+	else
+		((void (*)(struct net *, struct socket *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk->sk_socket, cfg);
+}
+
+/* Macros come AFTER the wrapper bodies: inside a wrapper the raw symbol
+ * must still resolve to the real kernel function, not to itself. */
+#define setup_udp_tunnel_sock(net, sk, sock_cfg) wg_setup_udp_tunnel_sock(net, sk, sock_cfg)
+#define udp_tunnel_sock_release(sk) wg_udp_tunnel_sock_release(sk)
+#endif
+"""
+if needle not in text:
+    sys.stderr.write("udp_tunnel ABI: version-gated block not found in compat.h\n")
+    sys.exit(1)
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(text.replace(needle, dispatch, 1))
+PY
+}'''
+
+def patch_source(directory):
+    """Retain upstream ABI patches; stamp DKMS builds with the actual version."""
+    src = Path(directory)
+    dkms = src / 'dkms.conf'
+    data = dkms.read_text()
+    make_line = 'MAKE[0]="make KERNELRELEASE=${kernelver} WIREGUARD_VERSION=${PACKAGE_VERSION}"\n'
+    if make_line in data:
+        return
     if re.search(r'(?m)^MAKE\[', data):
-        raise RuntimeError('Unexpected upstream DKMS MAKE override; sources not changed')
-    header.write_text(text.replace(old, COMPAT))
-    build.write_text(kb + KBUILD)
-    (src / 'compat/lucx_udp_probe.c').write_text(PROBE)
+        raise RuntimeError('Unknown DKMS MAKE override; sources not changed')
+    # No edits to compat.h/Kbuild/socket.c: upstream owns all kernel ABI fixes.
     dkms.write_text(data + '\n' + make_line)
+
 
 def run(*args, timeout=30):
     try:
@@ -368,35 +356,44 @@ def needs_rebuild():
     if not MARKER.is_file() or MARKER.read_text().strip() != REV:
         return True
     current = os.uname().release
-    return any('-lucxudp2' not in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout
+    return any('-lucxpro280' not in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout
                for k in kernels() if not archived_without_headers(k, current))
 
 def patch_installer(file):
     path = Path(file)
     text = path.read_text(encoding='utf-8')
-    if '# LUCX UDP installer udp-api-1' in text:
-        text = text.replace('# LUCX UDP installer udp-api-1', '# LUCX UDP installer udp-api-2')
-        text = text.replace('MOD_VER="${MOD_VER}-lucxudp1"', 'MOD_VER="${MOD_VER}-lucxudp2"')
-        path.write_text(text, encoding='utf-8')
+    marker = '# LUCX AWG installer upstream-udp-280-1'
+    if marker in text:
+        if UPSTREAM_UDP_FUNCTION not in text or '    python3 ' + SELF + ' patch-source "$PWD" || exit 1\n' not in text:
+            raise RuntimeError('Incomplete Pro DKMS identity patch')
         return
-    if '# LUCX UDP installer udp-api-2' in text:
-        return
+    legacy = bool(re.search(r'# LUCX UDP installer udp-api-[12]', text))
     start = text.find('apply_udp_tunnel_abi_compat() {')
-    end = text.find('\nPY\n}\n', start)
-    if end >= 0:
-        end += len('\nPY')
+    if start < 0:
+        raise RuntimeError('Unsupported LucX installer; no changes made')
+    if legacy:
+        end = text.find('\n}\n', start)
+        if end < 0 or ' patch-source "$PWD"' not in text[start:end]:
+            raise RuntimeError('Unknown legacy Pro UDP wrapper; no changes made')
+        # Old Pro replaced the upstream function; restore the exact 279/280 fix.
+        text = text[:start] + UPSTREAM_UDP_FUNCTION + text[end + len('\n}'):]
+        text = re.sub(r'# LUCX UDP installer udp-api-[12]\nif \[\[.*?\nfi\n(?=# Skip DKMS/kernel when the installed module SHA)',
+                      '', text, flags=re.S)
+        text = re.sub(r'(?m)^    MOD_VER="\$\{MOD_VER\}-lucxudp[12]"\n', '', text)
+    else:
+        end = text.find('\nPY\n}\n', start)
+        block = text[start:end] if end >= 0 else ''
+        if '__builtin_types_compatible_p' not in block or 'wg_setup_udp_tunnel_sock' not in block:
+            raise RuntimeError('Installer lacks the upstream UDP signature fix; no changes made')
     gate = '# Skip DKMS/kernel when the installed module SHA'
-    call = '    apply_udp_tunnel_abi_compat socket.c || \\\n'
-    if start < 0 or end < 0 or text.count(gate) != 1 or text.count(call) != 1:
+    pattern = r'    apply_udp_tunnel_abi_compat (?:socket\.c|compat/compat\.h) \|\| (?:' + re.escape(chr(92)) + r'\n[^\n]*|exit 1)\n'
+    if text.count(gate) != 1 or len(list(re.finditer(pattern, text))) != 1:
         raise RuntimeError('Unsupported LucX installer layout; no changes made')
-    # An unknown source patch must fail, rather than continuing without compat.
-    tail = text[end + 3:]
-    replacement = f'''apply_udp_tunnel_abi_compat() {{
-    python3 {SELF} patch-source "$PWD"
-}}
-'''
-    text = text[:start] + replacement + tail
-    text = text.replace(gate, f'''# LUCX UDP installer udp-api-2
+    text = re.sub(pattern,
+                  '    MOD_VER="${MOD_VER}-lucxpro280"\n'
+                  f'    python3 {SELF} patch-source "$PWD" || exit 1\n'
+                  '    apply_udp_tunnel_abi_compat compat/compat.h || exit 1\n', text, count=1)
+    text = text.replace(gate, f'''{marker}
 if [[ "$DO_UNINSTALL" -ne 1 ]]; then
     if python3 {SELF} needs-rebuild; then FORCE_REBUILD=1; fi
     trap 'lucx_rc=$?; lucx_ready_rc=0; python3 {SELF} ready --installed --installer-exit "$lucx_rc" || lucx_ready_rc=$?; if [[ "$lucx_rc" -eq 0 ]]; then lucx_rc=$lucx_ready_rc; fi; exit "$lucx_rc"' EXIT
@@ -404,16 +401,12 @@ fi
 {gate}''', 1)
     uninstall = 'if [[ $DO_UNINSTALL -eq 1 ]]; then\n'
     if text.count(uninstall) != 1:
-        raise RuntimeError('Unsupported LucX uninstall branch; no changes made')
-    text = text.replace(uninstall, uninstall +
-                        f"    trap 'lucx_rc=$?; if [[ \"$lucx_rc\" -eq 0 ]]; then python3 {SELF} cleanup; fi; exit \"$lucx_rc\"' EXIT\n", 1)
-    # Locate the call and its warning continuation, preserving following code.
-    text = re.sub(r'    apply_udp_tunnel_abi_compat socket\.c \|\| \\\n[^\n]*\n',
-                  '    MOD_VER="${MOD_VER}-lucxudp2"\n'
-                  '    apply_udp_tunnel_abi_compat socket.c || exit 1\n', text, count=1)
-    text = text.replace('=== Установка AWG завершена ===', '=== Штатная установка AWG завершена; проверяем готовность ===')
-    # Keep the marker tied to successful patched sources, not just a loaded old module.
+        raise RuntimeError('Unsupported uninstall branch; no changes made')
+    if not legacy:
+        text = text.replace(uninstall, uninstall +
+                            f"    trap 'lucx_rc=$?; if [[ \"$lucx_rc\" -eq 0 ]]; then python3 {SELF} cleanup; fi; exit \"$lucx_rc\"' EXIT\n", 1)
     path.write_text(text, encoding='utf-8')
+
 
 def ready(installed=False, next_kernel=None, installer_exit=None):
     current = os.uname().release
@@ -422,7 +415,7 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
         if not re.fullmatch(r'[0-9][A-Za-z0-9._+-]{0,127}', next_kernel):
             raise ValueError('Invalid next kernel release')
         targets.add(next_kernel)
-    results = {k: '-lucxudp2' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
+    results = {k: '-lucxpro280' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
     archived = [k for k, ok in results.items() if not ok and archived_without_headers(k, current, next_kernel)]
     required = {k: ok for k, ok in results.items() if k not in archived}
     tools = all(shutil.which(t) for t in ('awg', 'awg-quick', 'ip'))
@@ -476,11 +469,11 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     active_file = Path('/sys/module/amneziawg/version')
     active_version = active_file.read_text().strip() if active_file.is_file() else ''
     replacement_active = bool(active_version and active_version == disk_version)
-    if reboot_pending and replacement_active and '-lucxudp2' in disk_version and all(required.values()):
+    if reboot_pending and replacement_active and '-lucxpro280' in disk_version and all(required.values()):
         reboot_flag.unlink()
         reboot_pending = False
     local_ready = local_ready and replacement_active and not reboot_pending and installer_exit in (None, 0)
-    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxudp2' in disk_version:
+    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
         MARKER.parent.mkdir(parents=True, exist_ok=True)
         MARKER.write_text(REV + '\n')
     dns = run('getent', 'ahostsv4', 'example.org', timeout=8).returncode == 0
@@ -819,6 +812,199 @@ PY_VERIFY_ARCHIVE
 }
 
 # ── restore ───────────────────────────────────────────────────────────────────
+run_pro_compat() {
+    python3 - "$@" <<'PY_PRO_COMPAT'
+#!/usr/bin/env python3
+"""Local, idempotent Pro migrations. Never resets panel accounts or ports."""
+import argparse
+from contextlib import closing
+import json
+from pathlib import Path
+import re
+import sqlite3
+
+REVISION = '2026.10.04-280.1'
+PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
+
+
+def client_sync_sql():
+    # Rebuild from normalized records, not an email snapshot of a deleted row.
+    rebuild = """UPDATE inbounds SET settings = json_set(
+      CASE WHEN json_valid(settings) THEN settings ELSE '{}' END, '$.clients',
+      json(COALESCE((SELECT json_group_array(json_object(
+        'email', c.email, 'enable', json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)))
+        FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
+        WHERE ci.inbound_id=inbounds.id AND c.email != ''), '[]')))
+      WHERE protocol IN %s""" % PROTOCOLS
+    sql = 'BEGIN IMMEDIATE;\n'
+    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete'):
+        sql += f'DROP TRIGGER IF EXISTS lucx_shareonly_clients_{name};\n'
+    # Old Pro component removals and old archives can leave dangling links.
+    sql += ('DELETE FROM client_inbounds WHERE client_id NOT IN (SELECT id FROM clients) '
+            'OR inbound_id NOT IN (SELECT id FROM inbounds);\n')
+    sql += rebuild + ';\n'
+    for name, event, predicate in (
+        ('ins', 'AFTER INSERT ON client_inbounds', 'id=NEW.inbound_id'),
+        ('del', 'AFTER DELETE ON client_inbounds', 'id=OLD.inbound_id'),
+        ('link_update', 'AFTER UPDATE OF client_id,inbound_id ON client_inbounds',
+         'id IN (OLD.inbound_id,NEW.inbound_id)'),
+        ('client_update', 'AFTER UPDATE OF email,enable ON clients',
+         'id IN (SELECT inbound_id FROM client_inbounds WHERE client_id=NEW.id)'),
+    ):
+        sql += (f'CREATE TRIGGER lucx_shareonly_clients_{name} {event} BEGIN\n'
+                + rebuild + ' AND ' + predicate + ';\nEND;\n')
+    # BEFORE preserves the email until join-delete triggers finish; unrelated
+    # inbounds/clients are never removed. Handles direct SQL component removal too.
+    sql += '''CREATE TRIGGER lucx_shareonly_clients_client_delete BEFORE DELETE ON clients
+      BEGIN DELETE FROM client_inbounds WHERE client_id=OLD.id; END;
+      CREATE TRIGGER lucx_shareonly_clients_inbound_delete BEFORE DELETE ON inbounds
+      BEGIN DELETE FROM client_inbounds WHERE inbound_id=OLD.id; END;
+      COMMIT;'''
+    return sql
+
+
+def sync_clients(db):
+    required = {'clients': {'id', 'email', 'enable'},
+                'client_inbounds': {'client_id', 'inbound_id'},
+                'inbounds': {'id', 'protocol', 'settings'}}
+    for table, columns in required.items():
+        existing = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+        if not columns <= existing:
+            raise RuntimeError(f'Unsupported panel schema: {table}; no migration performed')
+    db.executescript(client_sync_sql())
+
+
+def provider_route(settings):
+    prefix = '/' + settings.get('subClashPath', '/mihomo/').strip('/') + '/'
+    if not re.fullmatch(r'/[A-Za-z0-9_/-]+/', prefix) or '//' in prefix:
+        raise RuntimeError('Unsupported native Clash path')
+    port = int(settings.get('subPort', 2096))
+    if not 1 <= port <= 65535:
+        raise RuntimeError('Invalid subscription port')
+    scheme = 'https' if settings.get('subCertFile') and settings.get('subKeyFile') else 'http'
+    return f'''    # LUCX PRO native provider BEGIN
+    location ~ ^/__lucx_provider/(?<lucx_provider_id>[^/]+)/?$ {{
+        if ($hack = 1) {{ return 404; }}
+        rewrite ^ {prefix}$lucx_provider_id break;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_redirect off;
+        proxy_pass {scheme}://127.0.0.1:{port};
+    }}
+    # LUCX PRO native provider END
+'''
+
+
+def repair_nginx(root, settings):
+    snippet = root / 'etc/nginx/snippets/includes.conf'
+    template = root / 'var/www/subpage/clash.yaml.tpl'
+    if template.is_file():
+        text = template.read_text(encoding='utf-8')
+        text, count = re.subn(
+            r'(?m)^(    url: https://[^/\s]+)/[^/\s]+/\$\{SUB_ID\}\?provider=1$',
+            r'\1/__lucx_provider/${SUB_ID}', text)
+        if not count and '/__lucx_provider/${SUB_ID}' not in text:
+            raise RuntimeError('Unknown Clash provider URL; refusing to guess')
+        if not snippet.is_file():
+            raise RuntimeError('Clash nginx snippet is missing')
+        route = provider_route(settings)
+        original = snippet.read_text(encoding='utf-8')
+        cleaned = re.sub(r'    # LUCX PRO native provider BEGIN\n.*?    # LUCX PRO native provider END\n',
+                         '', original, flags=re.S)
+        snippet.write_text(route + cleaned, encoding='utf-8')
+        template.write_text(text, encoding='utf-8')
+    # Match only the saved panel port; Xray inbound HTTP proxies remain HTTP.
+    panel_port = int(settings.get('webPort', 54321))
+    scheme = 'https' if settings.get('webCertFile') and settings.get('webKeyFile') else 'http'
+    for path in (root / 'etc/nginx/sites-available').glob('*.conf'):
+        text = path.read_text(encoding='utf-8')
+        repaired = re.sub(r'proxy_pass https?://127\.0\.0\.1:' + str(panel_port) + r'(?=[/;])',
+                          f'proxy_pass {scheme}://127.0.0.1:{panel_port}', text)
+        if repaired != text:
+            path.write_text(repaired, encoding='utf-8')
+
+
+def remove_forwarding_override(root):
+    path = root / 'etc/sysctl.d/99-lucx-ui-forwarding.conf'
+    if not path.is_file():
+        return
+    text = path.read_text(encoding='utf-8')
+    text = re.sub(r'(?m)^\s*net\.ipv4\.ip_forward\s*=\s*1\s*(?:#.*)?\n?', '', text)
+    if any(line.strip() and not line.lstrip().startswith('#') for line in text.splitlines()):
+        path.write_text(text, encoding='utf-8')
+    else:
+        path.unlink()
+    # Do not write ip_forward=0: active panel tunnels own runtime forwarding.
+
+
+def migrate(root, clients_only=False):
+    with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db, db:
+        sync_clients(db)
+        if clients_only:
+            return
+        settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
+        repair_nginx(root, settings)
+        for row_id, raw in db.execute("SELECT id,settings FROM inbounds WHERE protocol='csqtt'").fetchall():
+            data = json.loads(raw)
+            data['routeThroughXray'] = False
+            db.execute('UPDATE inbounds SET settings=? WHERE id=?',
+                       (json.dumps(data, ensure_ascii=False), row_id))
+        db.commit()
+    remove_forwarding_override(root)
+
+
+def inspect(root):
+    path = root / 'etc/x-ui/x-ui.db'
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+        print('Инбаунды:', ', '.join(f'{p}={n}' for p, n in db.execute(
+            'SELECT protocol,COUNT(*) FROM inbounds GROUP BY protocol')))
+        for row_id, protocol, raw in db.execute(
+                "SELECT id,protocol,settings FROM inbounds WHERE protocol IN ('csqtt','qwdtt','tproxy','amneziawg')"):
+            data = json.loads(raw)
+            config = data.get('server', data) if protocol == 'amneziawg' else data
+            default = protocol == 'qwdtt'
+            route = config.get('routeThroughXray', default)
+            change = ' → false (штатный direct)' if protocol == 'csqtt' else ' (сохраняется)'
+            print(f'{protocol} #{row_id}: routeThroughXray={route}{change}')
+        triggers = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'lucx_shareonly_%'")]
+        print('Синхронизация клиентов:', ', '.join(triggers) or 'отсутствует')
+        dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
+                              '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        print('Осиротевшие связи:', dangling)
+    for name, relative in (
+        ('AWG guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
+        ('Clash renderer', 'etc/systemd/system/lucx-clash-sub.service'),
+        ('AdGuard', 'opt/AdGuardHome'), ('RKN guard', 'usr/local/bin/rkn-guard'),
+        ('BBR панели', 'etc/sysctl.d/99-bbr-x-ui.conf'),
+        ('Pro ip_forward override', 'etc/sysctl.d/99-lucx-ui-forwarding.conf'),
+        ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
+    ):
+        print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
+    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard.')
+    print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
+    print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall'))
+    parser.add_argument('--root', type=Path, default=Path('/'))
+    args = parser.parse_args()
+    root = args.root.resolve()
+    if args.action == 'firewall':
+        remove_forwarding_override(root)
+    elif args.action == 'report':
+        inspect(root)
+    else:
+        migrate(root, args.action == 'clients')
+
+
+if __name__ == '__main__':
+    main()
+PY_PRO_COMPAT
+}
+
 repair_clash_template() {
     [[ -f /var/www/subpage/clash.yaml.tpl ]] || return 0
     python3 <<'PY_CLASH_RESTORE'
@@ -836,7 +1022,7 @@ if expression not in text:
     text = text.replace(anchor, expression + anchor)
 text = text.replace('global-client-fingerprint: chrome\n', '')
 if '    path: ./proxy_providers/base64.yml\n' in text:
-    match = re.search(r'(?m)^    url: https://([^/\s]+)/([^/\s]+)/\$\{SUB_ID\}\?provider=1$', text)
+    match = re.search(r'(?m)^    url: https://([^/\s]+)/([^/\s]+)/\$\{SUB_ID\}(?:\?provider=1)?$', text)
     if not match:
         raise SystemExit('Unexpected provider URL; no changes made.')
     domain, sub_path = match.groups()
@@ -1059,6 +1245,7 @@ PY_META_AWG
     sanitize_awg_sysctl_file
     repair_clash_template
     repair_panel_clash_route
+    run_pro_compat apply
 
     # ── panel cert symlinks (/root/cert/<domain> → letsencrypt) ──────────
     # Backups made before /root/cert was in BACKUP_PATHS lack the symlinks
@@ -1238,9 +1425,7 @@ PY_TG_RESTORE
 
     # ── UFW ───────────────────────────────────────────────────────────────
     blue "==> Restoring UFW..."
-    if [[ -f /etc/sysctl.d/99-lucx-ui-forwarding.conf ]]; then
-        sysctl -p /etc/sysctl.d/99-lucx-ui-forwarding.conf >/dev/null 2>&1 || true
-    fi
+    # Pro forwarding override was retired by run_pro_compat; panel owns it.
     if [[ -f /etc/sysctl.d/99-zz-lucx-ui-tuning.conf ]]; then
         # Backups from older Pro releases may contain BBR/FQ keys here. If the
         # panel-owned file is absent, migrate an old BBR+fq state into it before
@@ -1285,6 +1470,9 @@ PY_TG_RESTORE
         ufw reload || die "Failed to apply restored UFW rules"
     fi
     green "    UFW state and runtime rules restored"
+    if systemctl is-active --quiet x-ui; then
+        systemctl restart x-ui || die "Panel failed to reapply tunnel firewall after UFW restore"
+    fi
 
     local required_service saved_active
     for required_service in x-ui nginx lucx-clash-sub AdGuardHome; do
@@ -1365,7 +1553,7 @@ What is backed up:
   /opt/AdGuardHome                self-hosted DoH (if installed)
   rkn-guard binary, manager, ipset/UFW state and update timers
   /var/lib/lucx-ui-preinstall     pre-install firewall snapshot and auto-domain selection
-  /etc/sysctl.d/99-lucx-ui-forwarding.conf  persistent IPv4 forwarding
+  legacy Pro forwarding file is archived and retired on restore (panel owns forwarding)
   relevant services and timers from /etc/systemd/system
   /etc/default/ufw + /etc/ufw/{user,before}*.rules  firewall policy/rules
   root crontab + /etc/cron.d/

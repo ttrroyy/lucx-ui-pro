@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Regenerate the self-contained installer/restore helper after editing pro-compat.py."""
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[2]
+helper = (root / 'assets/compat/pro-compat.py').read_text(encoding='utf-8').rstrip()
+awg = (root / 'assets/compat/awg-compat.py').read_text(encoding='utf-8').rstrip()
+for relative in ('lucx-ui-latest.sh', 'assets/backup/lucx-ui-backup.sh'):
+    path = root / relative
+    text = path.read_text(encoding='utf-8')
+    marker = "<<'PY_PRO_COMPAT'\n"
+    if text.count(marker) != 1:
+        raise SystemExit(f'Expected exactly one helper in {relative}')
+    before, tail = text.split(marker, 1)
+    _, after = tail.split('\nPY_PRO_COMPAT\n', 1)
+    text = before + marker + helper + '\nPY_PRO_COMPAT\n' + after
+    marker = "<<'PY_LUCX_AWG_COMPAT'\n"
+    if text.count(marker) != 1:
+        raise SystemExit(f'Expected exactly one AWG helper in {relative}')
+    before, tail = text.split(marker, 1)
+    _, after = tail.split('\nPY_LUCX_AWG_COMPAT\n', 1)
+    path.write_text(before + marker + awg + '\nPY_LUCX_AWG_COMPAT\n' + after,
+                    encoding='utf-8', newline='\n')
+    print(relative)
