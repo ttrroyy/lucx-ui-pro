@@ -180,14 +180,24 @@ fi
     path.write_text(text, encoding='utf-8')
 
 
-def ready(installed=False, next_kernel=None, installer_exit=None):
+def legacy_panel():
+    result = run('/usr/local/x-ui/x-ui', '-v')
+    if result.returncode:
+        raise RuntimeError('Cannot determine installed panel version')
+    return result.stdout.strip().lstrip('v') in ('3.8.5-lucx.279', '3.9.0-lucx.280')
+
+
+def ready(installed=False, next_kernel=None, installer_exit=None, native=False):
     current = os.uname().release
     targets = set(kernels())
     if next_kernel:
         if not re.fullmatch(r'[0-9][A-Za-z0-9._+-]{0,127}', next_kernel):
             raise ValueError('Invalid next kernel release')
         targets.add(next_kernel)
-    results = {k: '-lucxpro280' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
+    def module_ok(kernel):
+        result = run('modinfo', '-k', kernel, '-F', 'version', 'amneziawg')
+        return result.returncode == 0 and bool(result.stdout.strip()) and (native or '-lucxpro280' in result.stdout)
+    results = {k: module_ok(k) for k in sorted(targets)}
     archived = [k for k, ok in results.items() if not ok and archived_without_headers(k, current, next_kernel)]
     required = {k: ok for k, ok in results.items() if k not in archived}
     tools = all(shutil.which(t) for t in ('awg', 'awg-quick', 'ip'))
@@ -241,11 +251,11 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     active_file = Path('/sys/module/amneziawg/version')
     active_version = active_file.read_text().strip() if active_file.is_file() else ''
     replacement_active = bool(active_version and active_version == disk_version)
-    if reboot_pending and replacement_active and '-lucxpro280' in disk_version and all(required.values()):
+    if reboot_pending and replacement_active and (native or '-lucxpro280' in disk_version) and all(required.values()):
         reboot_flag.unlink()
         reboot_pending = False
     local_ready = local_ready and replacement_active and not reboot_pending and installer_exit in (None, 0)
-    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
+    if not native and installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
         MARKER.parent.mkdir(parents=True, exist_ok=True)
         MARKER.write_text(REV + '\n')
     dns = run('getent', 'ahostsv4', 'example.org', timeout=8).returncode == 0
@@ -263,7 +273,7 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
             if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
                 rx += int(parts[2])
                 tx += int(parts[3])
-    report = dict(revision=REV, checked_at=int(time.time()), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+    report = dict(revision=REV, native_module=native, checked_at=int(time.time()), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                   current_kernel=current, modules=results, required_modules=required, archived_kernels_without_modules=archived, tools_available=bool(tools),
                   module_loaded=loaded, temporary_interface=interface,
                   installed_module_version=disk_version, loaded_module_version=active_version,
@@ -316,11 +326,15 @@ def main():
     parser.add_argument('--installed', action='store_true')
     parser.add_argument('--next-kernel')
     parser.add_argument('--installer-exit', type=int)
+    parser.add_argument('--native', action='store_true')
     args = parser.parse_args()
     if args.action == 'patch-source':
         patch_source(args.path)
     elif args.action == 'patch-installer':
-        patch_installer(args.path)
+        if legacy_panel():
+            patch_installer(args.path)
+        else:
+            print('AWG: newer panel; preserving the bundled upstream installer and ABI fixes.')
     elif args.action == 'needs-rebuild':
         return 0 if needs_rebuild() else 1
     elif args.action == 'reboot-required':
@@ -329,7 +343,7 @@ def main():
         MARKER.unlink(missing_ok=True)
         REPORT.unlink(missing_ok=True)
     else:
-        return ready(args.installed, args.next_kernel, args.installer_exit)
+        return ready(args.installed, args.next_kernel, args.installer_exit, args.native or not legacy_panel())
     return 0
 
 if __name__ == '__main__':

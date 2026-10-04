@@ -408,14 +408,24 @@ fi
     path.write_text(text, encoding='utf-8')
 
 
-def ready(installed=False, next_kernel=None, installer_exit=None):
+def legacy_panel():
+    result = run('/usr/local/x-ui/x-ui', '-v')
+    if result.returncode:
+        raise RuntimeError('Cannot determine installed panel version')
+    return result.stdout.strip().lstrip('v') in ('3.8.5-lucx.279', '3.9.0-lucx.280')
+
+
+def ready(installed=False, next_kernel=None, installer_exit=None, native=False):
     current = os.uname().release
     targets = set(kernels())
     if next_kernel:
         if not re.fullmatch(r'[0-9][A-Za-z0-9._+-]{0,127}', next_kernel):
             raise ValueError('Invalid next kernel release')
         targets.add(next_kernel)
-    results = {k: '-lucxpro280' in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout for k in sorted(targets)}
+    def module_ok(kernel):
+        result = run('modinfo', '-k', kernel, '-F', 'version', 'amneziawg')
+        return result.returncode == 0 and bool(result.stdout.strip()) and (native or '-lucxpro280' in result.stdout)
+    results = {k: module_ok(k) for k in sorted(targets)}
     archived = [k for k, ok in results.items() if not ok and archived_without_headers(k, current, next_kernel)]
     required = {k: ok for k, ok in results.items() if k not in archived}
     tools = all(shutil.which(t) for t in ('awg', 'awg-quick', 'ip'))
@@ -469,11 +479,11 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
     active_file = Path('/sys/module/amneziawg/version')
     active_version = active_file.read_text().strip() if active_file.is_file() else ''
     replacement_active = bool(active_version and active_version == disk_version)
-    if reboot_pending and replacement_active and '-lucxpro280' in disk_version and all(required.values()):
+    if reboot_pending and replacement_active and (native or '-lucxpro280' in disk_version) and all(required.values()):
         reboot_flag.unlink()
         reboot_pending = False
     local_ready = local_ready and replacement_active and not reboot_pending and installer_exit in (None, 0)
-    if installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
+    if not native and installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
         MARKER.parent.mkdir(parents=True, exist_ok=True)
         MARKER.write_text(REV + '\n')
     dns = run('getent', 'ahostsv4', 'example.org', timeout=8).returncode == 0
@@ -491,7 +501,7 @@ def ready(installed=False, next_kernel=None, installer_exit=None):
             if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
                 rx += int(parts[2])
                 tx += int(parts[3])
-    report = dict(revision=REV, checked_at=int(time.time()), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+    report = dict(revision=REV, native_module=native, checked_at=int(time.time()), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                   current_kernel=current, modules=results, required_modules=required, archived_kernels_without_modules=archived, tools_available=bool(tools),
                   module_loaded=loaded, temporary_interface=interface,
                   installed_module_version=disk_version, loaded_module_version=active_version,
@@ -544,11 +554,15 @@ def main():
     parser.add_argument('--installed', action='store_true')
     parser.add_argument('--next-kernel')
     parser.add_argument('--installer-exit', type=int)
+    parser.add_argument('--native', action='store_true')
     args = parser.parse_args()
     if args.action == 'patch-source':
         patch_source(args.path)
     elif args.action == 'patch-installer':
-        patch_installer(args.path)
+        if legacy_panel():
+            patch_installer(args.path)
+        else:
+            print('AWG: newer panel; preserving the bundled upstream installer and ABI fixes.')
     elif args.action == 'needs-rebuild':
         return 0 if needs_rebuild() else 1
     elif args.action == 'reboot-required':
@@ -557,7 +571,7 @@ def main():
         MARKER.unlink(missing_ok=True)
         REPORT.unlink(missing_ok=True)
     else:
-        return ready(args.installed, args.next_kernel, args.installer_exit)
+        return ready(args.installed, args.next_kernel, args.installer_exit, args.native or not legacy_panel())
     return 0
 
 if __name__ == '__main__':
@@ -834,12 +848,13 @@ run_pro_compat() {
 """Local, idempotent Pro migrations. Never resets panel accounts or ports."""
 import argparse
 from contextlib import closing
+import hashlib
 import json
 from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.2'
+REVISION = '2026.10.04-280.3'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
@@ -921,6 +936,192 @@ def sync_clients(db):
             raise RuntimeError(f'Unsupported panel schema: {table}; no migration performed')
     db.executescript(client_sync_sql([row[1] for row in db.execute('PRAGMA table_info(clients)')],
                                     [row[1] for row in db.execute('PRAGMA table_info(client_inbounds)')]))
+
+
+def detach_pro_triggers(db):
+    # Never touch triggers belonging to the panel or another application.
+    for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
+        if re.fullmatch(r'lucx_shareonly_clients_(ins|del|link_update|client_update|client_delete|inbound_delete|rename_merge)', name):
+            db.execute('DROP TRIGGER "' + name + '"')
+    db.commit()
+
+
+def probe_clients(db):
+    """Exercise Pro triggers against an isolated copy of the real migrated DB."""
+    with closing(sqlite3.connect(':memory:')) as copy:
+        db.backup(copy)
+        sync_clients(copy)
+        shares = copy.execute("SELECT id FROM inbounds WHERE protocol IN " + PROTOCOLS).fetchall()
+        for (inbound,) in shares:
+            members = copy.execute('SELECT c.id,c.email,c.enable FROM clients c JOIN client_inbounds ci '
+                                   'ON ci.client_id=c.id WHERE ci.inbound_id=?', (inbound,)).fetchall()
+            def assert_sync():
+                raw = copy.execute('SELECT settings FROM inbounds WHERE id=?', (inbound,)).fetchone()[0]
+                actual = sorted((c['email'], c['enable']) for c in json.loads(raw)['clients'])
+                expected = sorted((email, bool(enabled)) for _, email, enabled in members if email)
+                if actual != expected:
+                    raise RuntimeError('Client synchronization probe failed')
+            assert_sync()
+            # Bound the mutation probes for large installations; the complete
+            # membership list above is still compared for every shared inbound.
+            for client, email, enabled in members[:3]:
+                copy.execute('SAVEPOINT probe')
+                replacement = '__lucx_compat_probe_' + str(client)
+                while copy.execute('SELECT 1 FROM clients WHERE email=?', (replacement,)).fetchone():
+                    replacement += '_'
+                copy.execute('UPDATE clients SET email=? WHERE id=?', (replacement, client))
+                raw = json.loads(copy.execute('SELECT settings FROM inbounds WHERE id=?', (inbound,)).fetchone()[0])
+                if not any(c['email'] == replacement for c in raw['clients']):
+                    raise RuntimeError('Client rename probe failed')
+                copy.execute('ROLLBACK TO probe'); copy.execute('RELEASE probe')
+                copy.execute('SAVEPOINT probe')
+                copy.execute('UPDATE clients SET enable=? WHERE id=?', (not enabled, client))
+                raw = json.loads(copy.execute('SELECT settings FROM inbounds WHERE id=?', (inbound,)).fetchone()[0])
+                if email and next(c['enable'] for c in raw['clients'] if c['email'] == email) != bool(not enabled):
+                    raise RuntimeError('Client enable probe failed')
+                copy.execute('DELETE FROM client_inbounds WHERE client_id=? AND inbound_id=?', (client, inbound))
+                raw = json.loads(copy.execute('SELECT settings FROM inbounds WHERE id=?', (inbound,)).fetchone()[0])
+                if any(c['email'] == email for c in raw['clients']):
+                    raise RuntimeError('Client detach probe failed')
+                copy.execute('ROLLBACK TO probe'); copy.execute('RELEASE probe')
+                copy.execute('SAVEPOINT probe')
+                link = copy.execute('SELECT * FROM client_inbounds WHERE client_id=? AND inbound_id=?', (client, inbound)).fetchone()
+                copy.execute('DELETE FROM client_inbounds WHERE client_id=? AND inbound_id=?', (client, inbound))
+                placeholders = ','.join('?' for _ in link)
+                copy.execute('INSERT INTO client_inbounds VALUES(' + placeholders + ')', link)
+                raw = json.loads(copy.execute('SELECT settings FROM inbounds WHERE id=?', (inbound,)).fetchone()[0])
+                if email and not any(c['email'] == email for c in raw['clients']):
+                    raise RuntimeError('Client attach probe failed')
+                copy.execute('ROLLBACK TO probe'); copy.execute('RELEASE probe')
+                copy.execute('SAVEPOINT probe')
+                copy.execute('DELETE FROM clients WHERE id=?', (client,))
+                if copy.execute('SELECT 1 FROM client_inbounds WHERE client_id=?', (client,)).fetchone():
+                    raise RuntimeError('Client delete probe failed')
+                copy.execute('ROLLBACK TO probe'); copy.execute('RELEASE probe')
+            copy.execute('SAVEPOINT probe')
+            copy.execute('DELETE FROM inbounds WHERE id=?', (inbound,))
+            if copy.execute('SELECT 1 FROM client_inbounds WHERE inbound_id=?', (inbound,)).fetchone():
+                raise RuntimeError('Inbound delete probe failed')
+            copy.execute('ROLLBACK TO probe'); copy.execute('RELEASE probe')
+        if copy.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise RuntimeError('Compatibility probe damaged its database copy')
+    print('Client links: compatibility probes passed on a database copy.')
+
+
+def meaningful_json(value):
+    if isinstance(value, dict):
+        return {key: meaningful_json(item) for key, item in value.items() if key != 'updated_at'}
+    if isinstance(value, list):
+        return [meaningful_json(item) for item in value]
+    return value
+
+
+def protected_state(root):
+    with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
+        if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise RuntimeError('Panel database integrity check failed')
+        db.row_factory = sqlite3.Row
+        tables = {}
+        for table, fields in (
+            ('clients', ('id','email','uuid','sub_id','enable','total','total_gb','expiry_time','limit_ip',
+                         'password','auth','flow','security','reverse','wg_private_key','wg_public_key',
+                         'wg_allowed_ips','wg_pre_shared_key','wg_keep_alive','wg_forwarded_ports',
+                         'secret','ad_tag','limit_hwid','tg_id','group_name','comment','reset','reset_day',
+                         'reset_weekday','reset_max','traffic_reset','traffic_reset_day')),
+            ('inbounds', ('id','protocol','port','listen','enable','tag','settings','stream_settings','sniffing','allocate')),
+            ('users', ('id','username','password')),
+            ('client_inbounds', ('client_id','inbound_id','flow_override')),
+        ):
+            columns = {r[1] for r in db.execute('PRAGMA table_info(' + table + ')')}
+            required = {'clients': {'id','email','enable'}, 'inbounds': {'id','protocol','settings'},
+                        'users': {'id','username','password'}, 'client_inbounds': {'client_id','inbound_id'}}[table]
+            if not required <= columns:
+                raise RuntimeError('Unsupported migrated schema: ' + table)
+            selected = [f for f in fields if f in columns]
+            query = 'SELECT ' + ','.join('"'+f+'"' for f in selected) + ' FROM ' + table
+            if table == 'client_inbounds':
+                query += ' WHERE client_id IN (SELECT id FROM clients) AND inbound_id IN (SELECT id FROM inbounds)'
+            rows = [dict(row) for row in db.execute(query)]
+            types = {r[1]: r[2].upper() for r in db.execute('PRAGMA table_info(' + table + ')')}
+            for row in rows:
+                for key, value in list(row.items()):
+                    if types.get(key) == 'TEXT' and value is None:
+                        row[key] = ''
+                    if key == 'wg_keep_alive':
+                        row[key] = str(row[key])
+            if table == 'inbounds':
+                for row in rows:
+                    settings = json.loads(row['settings'])
+                    if not isinstance(settings, dict):
+                        raise RuntimeError('Unknown inbound settings layout')
+                    if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc'):
+                        settings.pop('clients', None)  # Derived from normalized memberships.
+                    if row['protocol'] == 'csqtt':
+                        settings.pop('routeThroughXray', None)  # The announced Pro direct repair.
+                    row['settings'] = meaningful_json(settings)
+                    for key in ('stream_settings','sniffing','allocate'):
+                        if row.get(key):
+                            row[key] = meaningful_json(json.loads(row[key]))
+            tables[table] = sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
+        settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
+        keys = ('webPort','webListen','webDomain','webBasePath','webCertFile','webKeyFile',
+                'subEnable','subPort','subPath','subClashPath','subDomain','subCertFile','subKeyFile',
+                'xrayTemplateConfig','timeLocation','twoFactorEnabled','twoFactorSecret')
+        saved_settings = {k: settings[k] for k in keys if k in settings}
+    files = {}
+    for folder in ('var/www',):
+        for file in (root / folder).rglob('*'):
+            if file.is_file() and file.name != 'clash.yaml.tpl':
+                files[file.relative_to(root).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
+    for relative in ('opt/AdGuardHome/AdGuardHome.yaml', 'etc/default/ufw'):
+        file = root / relative
+        if file.is_file():
+            files[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
+    for key in ('webCertFile','webKeyFile','subCertFile','subKeyFile'):
+        if settings.get(key):
+            file = root / settings[key].lstrip('/')
+            if not file.is_file():
+                raise RuntimeError('Configured certificate/key is missing')
+            files[file.relative_to(root).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
+    return {'tables': tables, 'settings': saved_settings, 'files': files}
+
+
+def verify_state(root, state, before_repair=False):
+    previous = json.loads(state.read_text(encoding='utf-8'))
+    current = protected_state(root)
+    for section in ('tables','settings','files'):
+        for name, value in previous[section].items():
+            if current[section].get(name) != value:
+                # Never log credential values or entire client records.
+                detail = ''
+                if section == 'tables' and name == 'inbounds':
+                    old = {r['id']: r for r in value}
+                    new = {r['id']: r for r in current[section].get(name, [])}
+                    changes = []
+                    for row_id, row in old.items():
+                        fields = [k for k, v in row.items() if new.get(row_id, {}).get(k) != v]
+                        if fields: changes.append(str(row_id) + ':' + ','.join(fields))
+                    detail = ' (' + '; '.join(changes) + ')'
+                raise RuntimeError('Update changed protected ' + section + ': ' + name + detail)
+    with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
+        dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
+                              '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        if dangling and not before_repair:
+            raise RuntimeError('Update left orphaned client memberships')
+    print('Protected clients, memberships, accounts, settings and files: preserved.')
+
+
+def adapt_updater(path):
+    """Keep the author's updater; suppress its setup wizard and defer AWG."""
+    text = path.read_text(encoding='utf-8')
+    config = '    config_after_update\n'
+    awg = '        bash "${awg_installer}" ||'
+    if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
+        raise RuntimeError('Native updater contract changed; panel has not been modified')
+    text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Build/check once, under the Pro BBR guard, using the NEW bundled installer.
+    text = text.replace(awg, '        true ||', 1)
+    path.write_text(text, encoding='utf-8', newline='\n')
 
 
 def provider_route(settings):
@@ -1050,11 +1251,28 @@ def inspect(root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall'))
+    parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
+                                         'capture', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
+    parser.add_argument('--state', type=Path)
+    parser.add_argument('--path', type=Path)
+    parser.add_argument('--before-repair', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.action == 'firewall':
+    if args.action == 'adapt-updater':
+        adapt_updater(args.path)
+    elif args.action == 'capture':
+        args.state.write_text(json.dumps(protected_state(root), ensure_ascii=False), encoding='utf-8')
+        args.state.chmod(0o600)
+    elif args.action == 'verify':
+        verify_state(root, args.state, args.before_repair)
+    elif args.action in ('probe', 'prepare-update'):
+        with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db:
+            if args.action == 'probe':
+                probe_clients(db)
+            else:
+                detach_pro_triggers(db)
+    elif args.action == 'firewall':
         remove_forwarding_override(root)
     elif args.action == 'report':
         inspect(root)
