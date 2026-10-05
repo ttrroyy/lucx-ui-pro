@@ -1059,7 +1059,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.5'
+REVISION = '2026.10.05-280.6'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
@@ -1958,6 +1958,12 @@ PY_TG_RESTORE
     if [[ -d "${staging}/cron.d" ]]; then
         cp -a "${staging}/cron.d/." /etc/cron.d/
         green "    /etc/cron.d restored"
+    fi
+
+    # Restored Pro cron owns standalone renewal and the nginx/panel hooks.
+    if crontab -l 2>/dev/null | grep -F 'certbot renew' | grep -Fq -- '--pre-hook "systemctl stop nginx"'; then
+        systemctl mask --now certbot.timer || die "Failed to disable competing Certbot timer"
+        systemctl enable --now cron || die "Failed to start renewal cron"
     fi
 
     # Older archives contain a second RUNET scheduler. Keep the restored .dat

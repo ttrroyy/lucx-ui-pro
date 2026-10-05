@@ -90,7 +90,7 @@ CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
 CHECK_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.04-280.5"
+PRO_COMPAT_REVISION="2026.10.05-280.6"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -1024,6 +1024,7 @@ PY_UPDATE_CERT_FILES
     fi
     printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
     printf '%s\n' "$script_commit" > "$PREINSTALL_STATE_DIR/pro-commit" || return 1
+    setup_cron || return 1
     setup_fail2ban || true
     msg_ok "Совместимость исправлена. Панель: $UPDATE_TARGET. Backup: /var/backups/x-ui."
 )
@@ -2119,7 +2120,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.5'
+REVISION = '2026.10.05-280.6'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
@@ -5656,6 +5657,8 @@ setup_cron() {
     fi
 
     systemctl enable --now cron 2>/dev/null || true
+    # The distro timer has no standalone nginx hooks. Use only our root cron.
+    systemctl mask --now certbot.timer || return 1
     remove_lucx_cron_jobs || return 1
     # Xray owns scheduled geodata downloads and reloads through cfg.geodata.
     # Retire the old RUNET-only updater when upgrading an existing installation.

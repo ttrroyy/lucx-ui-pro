@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.04-280.5'
+REVISION = '2026.10.05-280.6'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
 
 
