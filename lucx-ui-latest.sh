@@ -90,7 +90,7 @@ CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
 CHECK_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.05-280.6"
+PRO_COMPAT_REVISION="2026.10.06-281.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -305,7 +305,6 @@ TG_WEB_PROXY_UNINSTALL=""
 DEPLOY_RKN=""
 DEPLOY_AWG=""
 BASE_DEPENDENCIES_READY="0"
-AWG_INSTALL_FAILED=0
 CUSTOM_DOH_URL=""
 CUSTOM_DOH_HOST=""
 CUSTOM_DOH_IP=""
@@ -667,11 +666,6 @@ PY_UPDATE_EXTRACT
     # It must retain the release selector and known noninteractive hooks.
     run_pro_compat adapt-updater --path "$stage/native-update.sh" || return 1
     bash -n "$stage/native-update.sh" || return 1
-    if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/x-ui/.awg-module-version ]]; then
-        grep -q -- '--no-kernel-upgrade' "$stage/release/x-ui/bin/install-awg-module.sh" || {
-            msg_err 'Новый AWG installer не поддерживает обслуживание без смены ядра; панель не изменена.'; return 1;
-        }
-    fi
     chmod +x "$stage/release/x-ui/x-ui"
     local actual
     actual=$("$stage/release/x-ui/x-ui" -v) || return 1
@@ -916,13 +910,14 @@ PY_UPDATE_CERT_FILES
     trap 'failed=1' INT TERM
     systemctl stop lucx-awg-sysctl-guard.path lucx-awg-sysctl-guard.service lucx-awg-readiness.service 2>/dev/null || true
     systemctl stop lucx-log-policy.timer lucx-log-policy.service 2>/dev/null || true
+    install_awg_sysctl_guard || failed=1
     if [[ "${choice// /}" == 1 ]]; then
         run_pro_compat prepare-update || failed=1
         # Use the author's update.sh, not the interactive CLI menu. Preserve
         # the wizard settings and run AWG separately under the Pro BBR guard.
         # timeout/EOF prevent an unexpected new prompt hanging indefinitely.
         (( failed )) || timeout --foreground --signal=TERM --kill-after=30 1800 \
-            env XUI_UPDATE_TAG="$UPDATE_TARGET" XUI_UPDATE_STATUS_FILE="$stage/native-status.json" \
+            env LUCX_PRO_AWG_ENABLED="$awg_present" XUI_UPDATE_TAG="$UPDATE_TARGET" XUI_UPDATE_STATUS_FILE="$stage/native-status.json" \
             bash "$stage/native-update.sh" </dev/null || failed=1
         systemctl stop x-ui || failed=1
         # Stock updater removes some sidecar directories. Restore absent files
@@ -944,12 +939,9 @@ PY_UPDATE_CERT_FILES
     (( failed )) || install_awg_sysctl_guard || failed=1
     (( failed )) || /usr/local/sbin/lucx-awg-sysctl-guard || failed=1
     if (( failed == 0 )); then
-        patch_panel_awg_command || failed=1
         patch_panel_bbr_script || failed=1
-        if (( awg_present )); then
+        if [[ "${choice// /}" == 2 ]] && (( awg_present )); then
             install_awg_kernel || failed=1
-            [[ "${AWG_INSTALL_FAILED:-0}" == 0 ]] || failed=1
-            python3 /usr/local/lib/lucx-ui-pro/awg-compat.py ready || failed=1
         fi
     fi
     # Restore the operator's runtime choice even if native AWG changed it.
@@ -2120,21 +2112,42 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.05-280.6'
-PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
+REVISION = '2026.10.06-281.1'
+PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
 def client_sync_sql(client_columns=(), link_columns=('client_id', 'inbound_id')):
     # Rebuild from normalized records, not an email snapshot of a deleted row.
+    fields = ["'email',c.email", "'enable',json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)"]
+    # A settings save still feeds these cached clients through SyncInbound.
+    # Preserve the normalized identity, limits and credentials in that cache.
+    mapping = {'uuid':'id','sub_id':'subId','password':'password','auth':'auth',
+               'flow':'flow','security':'security','wg_private_key':'privateKey',
+               'wg_public_key':'publicKey','wg_pre_shared_key':'preSharedKey',
+               'wg_keep_alive':'keepAlive','wg_forwarded_ports':'forwardedPorts',
+               'secret':'secret','ad_tag':'adTag','limit_ip':'limitIp',
+               'total_gb':'totalGB','expiry_time':'expiryTime','tg_id':'tgId',
+               'group_name':'group','comment':'comment','reset':'reset',
+               'reset_day':'resetDay','reset_weekday':'resetWeekday','reset_max':'resetMax',
+               'traffic_reset':'trafficReset','traffic_reset_day':'trafficResetDay',
+               'created_at':'created_at','updated_at':'updated_at'}
+    for column, key in mapping.items():
+        if column in client_columns:
+            fields.append(f"'{key}',c.\"{column}\"")
+    if 'reverse' in client_columns:
+        fields.append("'reverse',json(CASE WHEN json_valid(c.reverse) THEN c.reverse ELSE 'null' END)")
+    if 'wg_allowed_ips' in client_columns:
+        fields.append("""'allowedIPs',json(CASE WHEN COALESCE(c.wg_allowed_ips,'')='' THEN '[]'
+          ELSE '[' || replace(json_quote(c.wg_allowed_ips),',','","') || ']' END)""")
+    client_json = 'json_object(' + ','.join(fields) + ')'
     rebuild = """UPDATE inbounds SET settings = json_set(
       CASE WHEN json_valid(settings) THEN settings ELSE '{}' END, '$.clients',
-      json(COALESCE((SELECT json_group_array(json_object(
-        'email', c.email, 'enable', json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)))
+      json(COALESCE((SELECT json_group_array(%s)
         FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
         WHERE ci.inbound_id=inbounds.id AND c.email != ''), '[]')))
-      WHERE protocol IN %s""" % PROTOCOLS
+      WHERE protocol IN %s""" % (client_json, PROTOCOLS)
     sql = 'BEGIN IMMEDIATE;\n'
-    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete', 'rename_merge'):
+    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete', 'rename_merge', 'inbound_update'):
         sql += f'DROP TRIGGER IF EXISTS lucx_shareonly_clients_{name};\n'
     # Old Pro component removals and old archives can leave dangling links.
     sql += ('DELETE FROM client_inbounds WHERE client_id NOT IN (SELECT id FROM clients) '
@@ -2177,11 +2190,21 @@ def client_sync_sql(client_columns=(), link_columns=('client_id', 'inbound_id'))
         ('del', 'AFTER DELETE ON client_inbounds', 'id=OLD.inbound_id'),
         ('link_update', 'AFTER UPDATE OF client_id,inbound_id ON client_inbounds',
          'id IN (OLD.inbound_id,NEW.inbound_id)'),
-        ('client_update', 'AFTER UPDATE OF email,enable ON clients',
+        ('client_update', 'AFTER UPDATE ON clients',
          'id IN (SELECT inbound_id FROM client_inbounds WHERE client_id=NEW.id)'),
     ):
         sql += (f'CREATE TRIGGER lucx_shareonly_clients_{name} {event} BEGIN\n'
                 + rebuild + ' AND ' + predicate + ';\nEND;\n')
+    # A sidecar settings save can replace our cache with stale form clients.
+    # Reconcile from normalized memberships only when the cache differs; this
+    # predicate also terminates recursion when recursive_triggers is enabled.
+    normalized = """COALESCE((SELECT json_group_array(%s)
+      FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
+      WHERE ci.inbound_id=NEW.id AND c.email!=''),'[]')""" % client_json
+    sql += (f'CREATE TRIGGER lucx_shareonly_clients_inbound_update AFTER UPDATE OF settings ON inbounds '
+            f'WHEN NEW.protocol IN {PROTOCOLS} AND json_valid(NEW.settings) '
+            f"AND COALESCE(json_extract(NEW.settings,'$.clients'),'') != {normalized} BEGIN\n"
+            + rebuild + ' AND id=NEW.id;\nEND;\n')
     # BEFORE preserves the email until join-delete triggers finish; unrelated
     # inbounds/clients are never removed. Handles direct SQL component removal too.
     sql += '''CREATE TRIGGER lucx_shareonly_clients_client_delete BEFORE DELETE ON clients
@@ -2207,7 +2230,7 @@ def sync_clients(db):
 def detach_pro_triggers(db):
     # Never touch triggers belonging to the panel or another application.
     for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
-        if re.fullmatch(r'lucx_shareonly_clients_(ins|del|link_update|client_update|client_delete|inbound_delete|rename_merge)', name):
+        if re.fullmatch(r'lucx_shareonly_clients_(ins|del|link_update|client_update|client_delete|inbound_delete|rename_merge|inbound_update)', name):
             db.execute('DROP TRIGGER "' + name + '"')
     db.commit()
 
@@ -2320,7 +2343,7 @@ def protected_state(root):
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):
                         raise RuntimeError('Unknown inbound settings layout')
-                    if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc'):
+                    if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux'):
                         settings.pop('clients', None)  # Derived from normalized memberships.
                     if row['protocol'] == 'csqtt':
                         settings.pop('routeThroughXray', None)  # The announced Pro direct repair.
@@ -2425,7 +2448,7 @@ def verify_state(root, state, before_repair=False):
 
 
 def adapt_updater(path):
-    """Keep the author's updater; suppress its setup wizard and defer AWG."""
+    """Keep the author's updater; suppress its setup wizard; retain native AWG."""
     text = path.read_text(encoding='utf-8')
     config = '    config_after_update\n'
     awg = '        bash "${awg_installer}" ||'
@@ -2440,8 +2463,17 @@ def adapt_updater(path):
             raise RuntimeError('Native updater start contract changed')
         text = text.replace(line, '        : # Pro starts panel after migration checks\n')
 
-    # Build/check once, under the Pro BBR guard, using the NEW bundled installer.
-    text = text.replace(awg, '        true ||', 1)
+    # Respect installations whose initial selector skipped AWG. When enabled,
+    # execute the author's original call with only the BBR assignments removed.
+    pattern = r'(?m)^        bash "\$\{awg_installer\}" \|\|[^\n]*\n'
+    def native_awg(match):
+        return ('        if [[ "${LUCX_PRO_AWG_ENABLED:-1}" == 1 ]]; then\n'
+                '            /usr/local/sbin/lucx-awg-sysctl-guard || exit 1\n'
+                + match.group(0).replace(' ||', ' || {', 1).rstrip('\n') + '; exit 1; }\n'
+                + '        fi\n')
+    text, count = re.subn(pattern, native_awg, text)
+    if count != 1:
+        raise RuntimeError('Native AWG update contract changed')
     path.write_text(text, encoding='utf-8', newline='\n')
 
 
@@ -2557,7 +2589,7 @@ def inspect(root):
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
         print('Осиротевшие связи:', dangling)
     for name, relative in (
-        ('AWG guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
+        ('AWG BBR guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
         ('Clash renderer', 'etc/systemd/system/lucx-clash-sub.service'),
         ('AdGuard', 'opt/AdGuardHome'), ('RKN guard', 'usr/local/bin/rkn-guard'),
         ('BBR панели', 'etc/sysctl.d/99-bbr-x-ui.conf'),
@@ -2565,7 +2597,7 @@ def inspect(root):
         ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
     ):
         print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
-    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard, таймеры RKN.')
+    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, исключение BBR из AWG, таймеры RKN.')
     print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
     print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
 
@@ -4671,389 +4703,121 @@ LUCX_AWG_GUARD=/usr/local/sbin/lucx-awg-sysctl-guard
 LUCX_AWG_GUARD_SERVICE=/etc/systemd/system/lucx-awg-sysctl-guard.service
 LUCX_AWG_GUARD_PATH=/etc/systemd/system/lucx-awg-sysctl-guard.path
 
-install_awg_compat_support() {
-    install -d -m 0755 /usr/local/lib/lucx-ui-pro
-    cat > /usr/local/lib/lucx-ui-pro/awg-compat.py <<'PY_LUCX_AWG_COMPAT'
+install_awg_bbr_support() {
+    systemctl stop lucx-awg-readiness.service lucx-awg-sysctl-guard.path lucx-awg-sysctl-guard.service 2>/dev/null || true
+    systemctl disable lucx-awg-readiness.service 2>/dev/null || true
+    mkdir -p /usr/local/lib/lucx-ui-pro
+    cat > /usr/local/lib/lucx-ui-pro/awg-bbr.py <<'PY_LUCX_AWG_BBR'
 #!/usr/bin/env python3
-"""Patch the bundled LucX installer; retain upstream repositories, pins and DKMS."""
+"""Keep AWG's performance file BBR-neutral; leave module installation upstream."""
 import argparse
-import json
-import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
-import tempfile
-import time
-
-REV = 'upstream-udp-280-1'
-MARKER = Path('/etc/x-ui/.lucx-awg-compat-version')
-REPORT = Path('/var/lib/lucx-ui-pro/awg-readiness.json')
-SELF = '/usr/local/lib/lucx-ui-pro/awg-compat.py'
-
-# Exact upstream function from LucX 279/280. Used only to retire old Pro
-# wrappers in restored/previously patched installers; fresh stock retains it.
-# Copyright (c) 2025 LucX-UI Project; PolyForm Noncommercial 1.0.0.
-UPSTREAM_UDP_FUNCTION = r'''apply_udp_tunnel_abi_compat() {
-    local f="${1:-compat/compat.h}"
-    if grep -qF 'wg_setup_udp_tunnel_sock' "$f" 2>/dev/null; then
-        echo -e "${GREEN}udp_tunnel ABI wrappers already in tree — skip.${NC}"
-        return 0
-    fi
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo -e "${YELLOW}python3 нет — патч udp_tunnel ABI пропущен (ядра с backport-ABI не соберутся).${NC}"
-        return 0
-    fi
-    echo -e "${YELLOW}Патч udp_tunnel ABI (детект сигнатуры вместо версии)...${NC}"
-    python3 - "$f" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8", errors="surrogateescape").read()
-needle = """\
-#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
-#include <net/udp_tunnel.h>
-#define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, sk->sk_socket, sock_cfg)
-#define udp_tunnel_sock_release(sk) udp_tunnel_sock_release(sk->sk_socket)
-#endif
-"""
-dispatch = """\
-/*
- * Linux 7.1.5 changed udp_tunnel_sock_release()/setup_udp_tunnel_sock() from
- * struct socket * to struct sock *, but distros backport the new ABI below
- * that version (Ubuntu generic 7.0.0-38, Debian 13 7.1.7+deb13), so
- * LINUX_VERSION_CODE cannot detect it. Probe the real signature at compile
- * time instead; call sites in socket.c already pass struct sock *.
- * From amneziawg-linux-kernel-module PR #218, adapted. LucX-UI patch.
- */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 5)
-#include <net/udp_tunnel.h>
-
-static inline void wg_udp_tunnel_sock_release(struct sock *sk)
-{
-	if (__builtin_types_compatible_p(typeof(&udp_tunnel_sock_release), void (*)(struct sock *)))
-		((void (*)(struct sock *))udp_tunnel_sock_release)(sk);
-	else
-		((void (*)(struct socket *))udp_tunnel_sock_release)(sk->sk_socket);
-}
-
-static inline void wg_setup_udp_tunnel_sock(struct net *net, struct sock *sk,
-					    struct udp_tunnel_sock_cfg *cfg)
-{
-	if (__builtin_types_compatible_p(typeof(&setup_udp_tunnel_sock),
-					 void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *)))
-		((void (*)(struct net *, struct sock *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk, cfg);
-	else
-		((void (*)(struct net *, struct socket *, struct udp_tunnel_sock_cfg *))setup_udp_tunnel_sock)(net, sk->sk_socket, cfg);
-}
-
-/* Macros come AFTER the wrapper bodies: inside a wrapper the raw symbol
- * must still resolve to the real kernel function, not to itself. */
-#define setup_udp_tunnel_sock(net, sk, sock_cfg) wg_setup_udp_tunnel_sock(net, sk, sock_cfg)
-#define udp_tunnel_sock_release(sk) wg_udp_tunnel_sock_release(sk)
-#endif
-"""
-if needle not in text:
-    sys.stderr.write("udp_tunnel ABI: version-gated block not found in compat.h\n")
-    sys.exit(1)
-open(path, "w", encoding="utf-8", errors="surrogateescape").write(text.replace(needle, dispatch, 1))
-PY
-}'''
-
-def patch_source(directory):
-    """Retain upstream ABI patches; stamp DKMS builds with the actual version."""
-    src = Path(directory)
-    dkms = src / 'dkms.conf'
-    data = dkms.read_text()
-    make_line = 'MAKE[0]="make KERNELRELEASE=${kernelver} WIREGUARD_VERSION=${PACKAGE_VERSION}"\n'
-    if make_line in data:
-        return
-    if re.search(r'(?m)^MAKE\[', data):
-        raise RuntimeError('Unknown DKMS MAKE override; sources not changed')
-    # No edits to compat.h/Kbuild/socket.c: upstream owns all kernel ABI fixes.
-    dkms.write_text(data + '\n' + make_line)
+import urllib.request
 
 
-def run(*args, timeout=30):
-    try:
-        return subprocess.run(args, text=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return subprocess.CompletedProcess(args, 127, '', str(exc))
-
-def kernels():
-    # Check all installed kernel images, including kernels lacking headers.
-    targets = {p.name[8:] for p in Path('/boot').glob('vmlinuz-*') if p.is_file()}
-    targets.add(os.uname().release)
-    for p in Path('/lib/modules').glob('*'):
-        if (p / 'build').exists():
-            targets.add(p.name)
-    return sorted(targets)
-
-def archived_without_headers(kernel, current, next_kernel=None):
-    # Retained old boot images may have no installable headers. They must not
-    # invalidate the current module or force endless rebuilds. Explicit boot
-    # targets, current kernels and kernels with headers remain mandatory.
-    if kernel in (current, next_kernel) or (Path('/lib/modules') / kernel / 'build').exists():
-        return False
-    if not re.match(r'^\d', kernel) or not re.match(r'^\d', current):
-        return False
-    return run('dpkg', '--compare-versions', kernel, 'lt', current).returncode == 0
+def strip_bbr(text):
+    return re.sub(r'(?m)^[ \t]*net\.(?:core\.default_qdisc[ \t]*=[ \t]*fq|ipv4\.tcp_congestion_control[ \t]*=[ \t]*bbr)[ \t]*\r?\n?', '', text)
 
 
-def needs_rebuild():
-    if not MARKER.is_file() or MARKER.read_text().strip() != REV:
-        return True
-    current = os.uname().release
-    return any('-lucxpro280' not in run('modinfo', '-k', k, '-F', 'version', 'amneziawg').stdout
-               for k in kernels() if not archived_without_headers(k, current))
-
-def patch_installer(file):
-    path = Path(file)
+def prepare_installer(path, version=None):
     text = path.read_text(encoding='utf-8')
-    marker = '# LUCX AWG installer upstream-udp-280-1'
-    if marker in text:
-        if UPSTREAM_UDP_FUNCTION not in text or '    python3 ' + SELF + ' patch-source "$PWD" || exit 1\n' not in text:
-            raise RuntimeError('Incomplete Pro DKMS identity patch')
+    # Old archives may contain our module wrapper. Restore the corresponding
+    # author's installer, rather than carrying a local kernel patch forward.
+    if any(marker in text for marker in ('awg-compat.py', '# LUCX UDP installer', '# LUCX AWG installer')):
+        if version is None:
+            version = subprocess.check_output(['/usr/local/x-ui/x-ui', '-v'], text=True).strip()
+        tag = 'v' + version.lstrip('v')
+        if not re.fullmatch(r'v\d+\.\d+\.\d+-lucx\.\d+', tag):
+            raise RuntimeError('Cannot identify upstream AWG installer version')
+        url = f'https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/{tag}/bin/install-awg-module.sh'
+        with urllib.request.urlopen(url, timeout=60) as response:
+            original = response.read().decode('utf-8')
+        subprocess.run(['bash', '-n'], input=original, text=True, check=True)
+        text = original
+    updated = strip_bbr(text)
+    if updated != path.read_text(encoding='utf-8'):
+        path.write_text(updated, encoding='utf-8')
+
+
+def clean_cli(path):
+    text = path.read_text(encoding='utf-8')
+    start = text.find('install_awg_module() {')
+    end = text.find('\nuninstall_awg_module()', start)
+    if start < 0 or end < 0:
         return
-    legacy = bool(re.search(r'# LUCX UDP installer udp-api-[12]', text))
-    start = text.find('apply_udp_tunnel_abi_compat() {')
-    if start < 0:
-        raise RuntimeError('Unsupported LucX installer; no changes made')
-    if legacy:
-        end = text.find('\n}\n', start)
-        if end < 0 or ' patch-source "$PWD"' not in text[start:end]:
-            raise RuntimeError('Unknown legacy Pro UDP wrapper; no changes made')
-        # Old Pro replaced the upstream function; restore the exact 279/280 fix.
-        text = text[:start] + UPSTREAM_UDP_FUNCTION + text[end + len('\n}'):]
-        text = re.sub(r'# LUCX UDP installer udp-api-[12]\nif \[\[.*?\nfi\n(?=# Skip DKMS/kernel when the installed module SHA)',
-                      '', text, flags=re.S)
-        text = re.sub(r'(?m)^    MOD_VER="\$\{MOD_VER\}-lucxudp[12]"\n', '', text)
-    else:
-        end = text.find('\nPY\n}\n', start)
-        block = text[start:end] if end >= 0 else ''
-        if '__builtin_types_compatible_p' not in block or 'wg_setup_udp_tunnel_sock' not in block:
-            raise RuntimeError('Installer lacks the upstream UDP signature fix; no changes made')
-    gate = '# Skip DKMS/kernel when the installed module SHA'
-    pattern = r'    apply_udp_tunnel_abi_compat (?:socket\.c|compat/compat\.h) \|\| (?:' + re.escape(chr(92)) + r'\n[^\n]*|exit 1)\n'
-    if text.count(gate) != 1 or len(list(re.finditer(pattern, text))) != 1:
-        raise RuntimeError('Unsupported LucX installer layout; no changes made')
-    text = re.sub(pattern,
-                  '    MOD_VER="${MOD_VER}-lucxpro280"\n'
-                  f'    python3 {SELF} patch-source "$PWD" || exit 1\n'
-                  '    apply_udp_tunnel_abi_compat compat/compat.h || exit 1\n', text, count=1)
-    text = text.replace(gate, f'''{marker}
-if [[ "$DO_UNINSTALL" -ne 1 ]]; then
-    if python3 {SELF} needs-rebuild; then FORCE_REBUILD=1; fi
-    trap 'lucx_rc=$?; lucx_ready_rc=0; python3 {SELF} ready --installed --installer-exit "$lucx_rc" || lucx_ready_rc=$?; if [[ "$lucx_rc" -eq 0 ]]; then lucx_rc=$lucx_ready_rc; fi; exit "$lucx_rc"' EXIT
-fi
-{gate}''', 1)
-    uninstall = 'if [[ $DO_UNINSTALL -eq 1 ]]; then\n'
-    if text.count(uninstall) != 1:
-        raise RuntimeError('Unsupported uninstall branch; no changes made')
-    if not legacy:
-        text = text.replace(uninstall, uninstall +
-                            f"    trap 'lucx_rc=$?; if [[ \"$lucx_rc\" -eq 0 ]]; then python3 {SELF} cleanup; fi; exit \"$lucx_rc\"' EXIT\n", 1)
-    path.write_text(text, encoding='utf-8')
+    block = text[start:end]
+    if 'lucx-awg-sysctl-guard' not in block:
+        return
+    block = re.sub(r'(?m)^    /usr/local/sbin/lucx-awg-sysctl-guard[^\n]*\n', '', block)
+    block = block.replace('    local rc=$?\n    return $rc\n', '')
+    path.write_text(text[:start] + block + text[end:], encoding='utf-8')
 
 
-def legacy_panel():
-    result = run('/usr/local/x-ui/x-ui', '-v')
-    if result.returncode:
-        raise RuntimeError('Cannot determine installed panel version')
-    return result.stdout.strip().lstrip('v') in ('3.8.5-lucx.279', '3.9.0-lucx.280')
+def cleanup_legacy_modules():
+    """One-time retirement of Pro DKMS identities, never native module versions."""
+    changed = False
+    result = subprocess.run(['dkms', 'status', 'amneziawg'], capture_output=True, text=True)
+    versions = set(re.findall(r'^amneziawg[/,]\s*([^,\s]+)', result.stdout, re.M))
+    for version in sorted(versions):
+        if re.fullmatch(r'[A-Za-z0-9_.-]+-lucx(?:pro280|udp[12])', version):
+            # A partially completed transition can register the native build
+            # while the Pro module remains installed. Retire that same-pin
+            # registration as well, so upstream installs its clean build.
+            base = re.sub(r'-lucx(?:pro280|udp[12])$', '', version)
+            if base in versions:
+                subprocess.run(['dkms', 'remove', '-m', 'amneziawg', '-v', base, '--all'], check=True)
+            subprocess.run(['dkms', 'remove', '-m', 'amneziawg', '-v', version, '--all'], check=True)
+            changed = True
+    # DKMS can restore an older "original_module" during uninstall. Remove
+    # only remnants whose embedded version still identifies a Pro build.
+    for file in Path('/lib/modules').glob('*/updates/dkms/amneziawg.ko*'):
+        version = subprocess.run(['modinfo', '-F', 'version', str(file)], capture_output=True, text=True).stdout.strip()
+        if re.fullmatch(r'[A-Za-z0-9_.-]+-lucx(?:pro280|udp[12])', version):
+            kernel = file.parents[2].name
+            file.unlink()
+            subprocess.run(['depmod', '-a', kernel], check=True)
+            changed = True
+    if changed:
+        Path('/etc/x-ui/.awg-module-version').unlink(missing_ok=True)
 
-
-def ready(installed=False, next_kernel=None, installer_exit=None, native=False):
-    current = os.uname().release
-    targets = set(kernels())
-    if next_kernel:
-        if not re.fullmatch(r'[0-9][A-Za-z0-9._+-]{0,127}', next_kernel):
-            raise ValueError('Invalid next kernel release')
-        targets.add(next_kernel)
-    def module_ok(kernel):
-        result = run('modinfo', '-k', kernel, '-F', 'version', 'amneziawg')
-        return result.returncode == 0 and bool(result.stdout.strip()) and (native or '-lucxpro280' in result.stdout)
-    results = {k: module_ok(k) for k in sorted(targets)}
-    archived = [k for k, ok in results.items() if not ok and archived_without_headers(k, current, next_kernel)]
-    required = {k: ok for k, ok in results.items() if k not in archived}
-    tools = all(shutil.which(t) for t in ('awg', 'awg-quick', 'ip'))
-    loaded = False
-    interface = False
-    failures = []
-    present = any(results.values()) or Path('/etc/x-ui/.awg-module-version').exists() or REPORT.is_file()
-    if not present and not installed:
-        print('AWG: not installed; readiness check skipped.')
-        return 0
-    for k, ok in results.items():
-        print(f'AWG patched module [{k}]: {"INSTALLED" if ok else "MISSING"}')
-    for k in archived:
-        print(f'AWG older kernel [{k}]: no headers/module; excluded from current readiness. Use --next-kernel if selected for boot.')
-    if run('modinfo', '-k', current, 'amneziawg').returncode == 0:
-        load = run('modprobe', 'amneziawg')
-        loaded = load.returncode == 0
-        if not loaded:
-            failures.append('modprobe: ' + load.stderr.strip())
-    if loaded and tools:
-        ns = f'lucx-awg-check-{os.getpid()}'
-        created = False
-        try:
-            create = run('ip', 'netns', 'add', ns)
-            created = create.returncode == 0
-            if not created:
-                failures.append('network namespace: ' + create.stderr.strip())
-            else:
-                with tempfile.TemporaryDirectory(prefix='lucx-awg-check-', dir='/run') as tmp:
-                    conf = Path(tmp) / 'lucxawgtest.conf'
-                    key = run('awg', 'genkey')
-                    if key.returncode:
-                        failures.append('awg genkey failed')
-                    else:
-                        conf.write_text('[Interface]\nPrivateKey = ' + key.stdout.strip() + '\n')
-                        conf.chmod(0o600)
-                        up = run('ip', 'netns', 'exec', ns, 'awg-quick', 'up', str(conf))
-                        if up.returncode == 0:
-                            interface = run('ip', 'netns', 'exec', ns, 'awg', 'show', 'lucxawgtest').returncode == 0
-                        if not interface:
-                            failures.append('awg-quick temporary interface failed: ' + up.stderr.strip())
-                        run('ip', 'netns', 'exec', ns, 'awg-quick', 'down', str(conf))
-        finally:
-            if created:
-                run('ip', 'netns', 'delete', ns)
-    local_ready = tools and loaded and interface and all(required.values())
-    # A loaded old module is not proof that the replacement is active.
-    reboot_flag = Path('/etc/x-ui/.awg-reboot-needed')
-    reboot_pending = reboot_flag.is_file()
-    disk_version = run('modinfo', '-F', 'version', 'amneziawg').stdout.strip()
-    active_file = Path('/sys/module/amneziawg/version')
-    active_version = active_file.read_text().strip() if active_file.is_file() else ''
-    replacement_active = bool(active_version and active_version == disk_version)
-    if reboot_pending and replacement_active and (native or '-lucxpro280' in disk_version) and all(required.values()):
-        reboot_flag.unlink()
-        reboot_pending = False
-    local_ready = local_ready and replacement_active and not reboot_pending and installer_exit in (None, 0)
-    if not native and installed and installer_exit in (None, 0) and all(required.values()) and '-lucxpro280' in disk_version:
-        MARKER.parent.mkdir(parents=True, exist_ok=True)
-        MARKER.write_text(REV + '\n')
-    dns = run('getent', 'ahostsv4', 'example.org', timeout=8).returncode == 0
-    interfaces = run('awg', 'show', 'interfaces').stdout.split() if tools else []
-    now = int(time.time())
-    handshakes = []
-    rx = tx = 0
-    if tools:
-        for line in run('awg', 'show', 'all', 'latest-handshakes').stdout.splitlines():
-            parts = line.split()
-            if len(parts) == 3 and parts[2].isdigit() and int(parts[2]) > 0:
-                handshakes.append(int(parts[2]))
-        for line in run('awg', 'show', 'all', 'transfer').stdout.splitlines():
-            parts = line.split()
-            if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
-                rx += int(parts[2])
-                tx += int(parts[3])
-    report = dict(revision=REV, native_module=native, checked_at=int(time.time()), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
-                  current_kernel=current, modules=results, required_modules=required, archived_kernels_without_modules=archived, tools_available=bool(tools),
-                  module_loaded=loaded, temporary_interface=interface,
-                  installed_module_version=disk_version, loaded_module_version=active_version,
-                  installer_exit=installer_exit,
-                  reboot_pending=reboot_pending, local_ready=bool(local_ready),
-                  next_boot_kernel=next_kernel or 'not_verified; all installed kernel images checked',
-                  host_dns=dns, interfaces=interfaces, client_dns='NOT_TESTED',
-                  observed_recent_handshake=any(0 <= now - h <= 180 for h in handshakes),
-                  observed_received_bytes=rx, observed_sent_bytes=tx,
-                  client_handshake_and_traffic='NOT_TESTED; server counters recorded separately', errors=failures)
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=REPORT.parent, prefix='.awg-readiness-')
-    with os.fdopen(fd, 'w') as out:
-        json.dump(report, out, indent=2)
-        out.write('\n')
-    os.replace(tmp, REPORT)
-    print(f'AWG current module: {"LOADED" if loaded else "NOT LOADED"}; tools: {"OK" if tools else "MISSING"}')
-    if installer_exit is not None:
-        print(f'AWG original installer exit code: {installer_exit}')
-    print(f'AWG isolated awg-quick interface: {"OK" if interface else "FAILED/NOT TESTED"}')
-    print(f'AWG loaded replacement: {"YES" if replacement_active else "NO"}; reboot flag: {reboot_pending}')
-    print(f'AWG host DNS: {"OK" if dns else "FAILED"}; client DNS and traffic: NOT TESTED')
-    print(f'AWG server observations: recent peer handshake={report["observed_recent_handshake"]}; received={rx} bytes; sent={tx} bytes')
-    print('AWG next boot kernel: ' + (next_kernel + ' (specified by operator)' if next_kernel else
-          'NOT VERIFIED; module availability checked for all installed images.'))
-    for failure in failures:
-        print(failure)
-    print('AWG local readiness: ' + ('READY (client traffic still requires testing)' if local_ready else 'INCOMPLETE'))
-    print('AWG report:', REPORT)
-    return 0 if local_ready else 1
-
-def reboot_required():
-    """Distinguish a successful fresh kernel upgrade from a broken build."""
-    if not REPORT.is_file() or not Path('/etc/x-ui/.awg-reboot-needed').is_file():
-        return False
-    report = json.loads(REPORT.read_text())
-    current = os.uname().release
-    modules = report.get('required_modules', {})
-    return (report.get('current_kernel') == current
-            and report.get('installer_exit') in (None, 0)
-            and not report.get('errors') and report.get('tools_available')
-            and not modules.get(current) and not Path('/lib/modules', current, 'build').exists()
-            and any(k != current and ok for k, ok in modules.items())
-            and all(ok for k, ok in modules.items() if k != current))
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['patch-source', 'patch-installer', 'needs-rebuild', 'ready', 'reboot-required', 'cleanup'])
-    parser.add_argument('path', nargs='?')
-    parser.add_argument('--installed', action='store_true')
-    parser.add_argument('--next-kernel')
-    parser.add_argument('--installer-exit', type=int)
-    parser.add_argument('--native', action='store_true')
+    parser.add_argument('command', choices=('prepare', 'sanitize', 'clean-cli', 'cleanup-legacy'))
+    parser.add_argument('path', type=Path, nargs='?', default=Path('/'))
     args = parser.parse_args()
-    if args.action == 'patch-source':
-        patch_source(args.path)
-    elif args.action == 'patch-installer':
-        if legacy_panel():
-            patch_installer(args.path)
-        else:
-            print('AWG: newer panel; preserving the bundled upstream installer and ABI fixes.')
-    elif args.action == 'needs-rebuild':
-        return 0 if needs_rebuild() else 1
-    elif args.action == 'reboot-required':
-        return 0 if reboot_required() else 1
-    elif args.action == 'cleanup':
-        MARKER.unlink(missing_ok=True)
-        REPORT.unlink(missing_ok=True)
+    if args.command == 'cleanup-legacy':
+        if subprocess.run(['sh', '-c', 'command -v dkms'], capture_output=True).returncode == 0:
+            cleanup_legacy_modules()
+        return
+    if not args.path.is_file():
+        return
+    if args.command == 'prepare':
+        prepare_installer(args.path)
+    elif args.command == 'clean-cli':
+        clean_cli(args.path)
     else:
-        return ready(args.installed, args.next_kernel, args.installer_exit, args.native or not legacy_panel())
-    return 0
+        text = args.path.read_text(encoding='utf-8')
+        updated = strip_bbr(text)
+        if updated != text:
+            args.path.write_text(updated, encoding='utf-8')
+
 
 if __name__ == '__main__':
-    try:
-        raise SystemExit(main())
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f'LucX AWG compat: {exc}')
-PY_LUCX_AWG_COMPAT
-    chmod 0755 /usr/local/lib/lucx-ui-pro/awg-compat.py
-    cat > /etc/systemd/system/lucx-awg-readiness.service <<'AWG_READINESS_UNIT'
-[Unit]
-Description=Check LucX AmneziaWG readiness after boot
-After=network-online.target x-ui.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /usr/local/lib/lucx-ui-pro/awg-compat.py ready
-TimeoutStartSec=180
-
-[Install]
-WantedBy=multi-user.target
-AWG_READINESS_UNIT
-    systemctl daemon-reload
-    systemctl enable lucx-awg-readiness.service >/dev/null
-    # Older backup archives contain the previous BBR-only guard.
-    if [[ -f /usr/local/sbin/lucx-awg-sysctl-guard ]] &&
-       ! grep -q 'awg-compat.py patch-installer' /usr/local/sbin/lucx-awg-sysctl-guard; then
-        cat >> /usr/local/sbin/lucx-awg-sysctl-guard <<'AWG_COMPAT_GUARD'
-if [[ -f /usr/local/x-ui/bin/install-awg-module.sh ]]; then
-    python3 /usr/local/lib/lucx-ui-pro/awg-compat.py patch-installer /usr/local/x-ui/bin/install-awg-module.sh || exit 1
-fi
-AWG_COMPAT_GUARD
-    fi
+    main()
+PY_LUCX_AWG_BBR
+    chmod 0755 /usr/local/lib/lucx-ui-pro/awg-bbr.py
+    for cli in /usr/bin/x-ui /usr/local/x-ui/x-ui.sh; do
+        python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py clean-cli "$cli" || return 1
+    done
+    python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py prepare /usr/local/x-ui/bin/install-awg-module.sh || return 1
+    python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py cleanup-legacy || return 1
+    rm -f /usr/local/lib/lucx-ui-pro/awg-compat.py /etc/x-ui/.lucx-awg-compat-version \
+          /var/lib/lucx-ui-pro/awg-readiness.json /etc/systemd/system/lucx-awg-readiness.service \
+          /etc/systemd/system/multi-user.target.wants/lucx-awg-readiness.service
+    systemctl daemon-reload || return 1
 }
 
 patch_awg_installer() {
@@ -5070,7 +4834,6 @@ new = re.sub(r'(?m)^\s*net\.ipv4\.tcp_congestion_control\s*=\s*bbr\s*$\n?', '', 
 if new != text:
     open(path, "w", encoding="utf-8", errors="surrogateescape").write(new)
 PY_AWG_PATCH
-    python3 /usr/local/lib/lucx-ui-pro/awg-compat.py patch-installer "$script" || return 1
     chmod +x "$script" 2>/dev/null || true
 }
 
@@ -5091,107 +4854,35 @@ sanitize_awg_sysctl_file() {
 }
 
 install_awg_sysctl_guard() {
-    install_awg_compat_support || return 1
+    install_awg_bbr_support || return 1
     mkdir -p /usr/local/sbin /etc/systemd/system
-
-    cat > "$LUCX_AWG_GUARD" <<'EOF'
+    cat > /usr/local/sbin/lucx-awg-sysctl-guard <<'AWG_BBR_GUARD'
 #!/bin/bash
-set -u
-SCRIPT=/usr/local/x-ui/bin/install-awg-module.sh
-SYSCTL=/etc/sysctl.d/99-awg-performance.conf
-
-# Keep the panel's install-awg wrapper BBR-neutral even after a panel update.
-for XUI in /usr/bin/x-ui /usr/local/x-ui/x-ui.sh; do
-    [[ -f "$XUI" ]] || continue
-    python3 - "$XUI" <<'PY_GUARD_XUI'
-import sys
-path=sys.argv[1]
-text=open(path,encoding="utf-8",errors="surrogateescape").read()
-start=text.find("install_awg_module() {")
-if start < 0:
-    raise SystemExit(0)
-end=text.find("\nuninstall_awg_module()", start)
-if end < 0:
-    raise SystemExit(0)
-block=text[start:end]
-block=block.replace("    /usr/local/sbin/lucx-awg-sysctl-guard >/dev/null 2>&1 || true\n", "    /usr/local/sbin/lucx-awg-sysctl-guard || return 1\n", 1)
-if 'lucx-awg-sysctl-guard' not in block and 'bash "$script" "$@"' in block:
-    block=block.replace(
-        '    bash "$script" "$@"\n',
-        '    /usr/local/sbin/lucx-awg-sysctl-guard || return 1\n'
-        '    bash "$script" "$@"\n'
-        '    local rc=$?\n'
-        '    /usr/local/sbin/lucx-awg-sysctl-guard >/dev/null 2>&1 || true\n'
-        '    return $rc\n',1)
-text=text[:start]+block+text[end:]
-open(path,'w',encoding='utf-8',errors='surrogateescape').write(text)
-PY_GUARD_XUI
-    chmod +x "$XUI" 2>/dev/null || true
-done
-
-if [[ -f "$SCRIPT" ]] && grep -Eq '^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$|^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$' "$SCRIPT"; then
-    sed -i -E \
-        -e '/^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$/d' \
-        -e '/^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$/d' \
-        "$SCRIPT"
-fi
-
-if [[ -f "$SYSCTL" ]] && grep -Eq '^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$|^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$' "$SYSCTL"; then
-    sed -i -E \
-        -e '/^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$/d' \
-        -e '/^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$/d' \
-        "$SYSCTL"
-    if [[ -f /etc/sysctl.d/99-bbr-x-ui.conf ]]; then
-        sysctl -p /etc/sysctl.d/99-bbr-x-ui.conf >/dev/null 2>&1 || true
-    elif [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)" == "bbr" ]]; then
-        restore=/etc/x-ui/.lucx-bbr-restore
-        qdisc=fq_codel
-        cc=cubic
-        if [[ -s "$restore" ]]; then
-            saved=$(tr -d '[:space:]' < "$restore" 2>/dev/null || true)
-            case "$saved" in
-                fq:*|fq_codel:*|cake:*|pfifo_fast:*) qdisc=${saved%%:*}; cc=${saved#*:} ;;
-            esac
-            [[ "$cc" == bbr || -z "$cc" ]] && cc=cubic
-        fi
-        sysctl -w "net.core.default_qdisc=$qdisc" >/dev/null 2>&1 || true
-        sysctl -w "net.ipv4.tcp_congestion_control=$cc" >/dev/null 2>&1 || true
-    fi
-fi
-if [[ -f "$SCRIPT" ]]; then
-    python3 /usr/local/lib/lucx-ui-pro/awg-compat.py patch-installer "$SCRIPT" || exit 1
-fi
-EOF
-    chmod 0755 "$LUCX_AWG_GUARD"
-
-    cat > "$LUCX_AWG_GUARD_SERVICE" <<'EOF'
+set -e
+python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py prepare /usr/local/x-ui/bin/install-awg-module.sh
+python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py sanitize /etc/sysctl.d/99-awg-performance.conf
+AWG_BBR_GUARD
+    chmod 0755 /usr/local/sbin/lucx-awg-sysctl-guard
+    cat > /etc/systemd/system/lucx-awg-sysctl-guard.service <<'AWG_BBR_SERVICE'
 [Unit]
-Description=Keep LucX AWG sysctl installer BBR-neutral
-
+Description=Keep AWG performance settings BBR-neutral
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/lucx-awg-sysctl-guard
-EOF
-
-    cat > "$LUCX_AWG_GUARD_PATH" <<'EOF'
+AWG_BBR_SERVICE
+    cat > /etc/systemd/system/lucx-awg-sysctl-guard.path <<'AWG_BBR_PATH'
 [Unit]
-Description=Watch LucX AWG installer and performance sysctl
-
+Description=Watch AWG performance settings for BBR assignments
 [Path]
 PathChanged=/usr/local/x-ui/bin/install-awg-module.sh
 PathChanged=/etc/sysctl.d/99-awg-performance.conf
-PathChanged=/usr/bin/x-ui
-PathChanged=/usr/local/x-ui/x-ui.sh
 Unit=lucx-awg-sysctl-guard.service
-
 [Install]
 WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable lucx-awg-sysctl-guard.path >/dev/null 2>&1 || true
-    systemctl start lucx-awg-sysctl-guard.service >/dev/null 2>&1 || true
-    systemctl start lucx-awg-sysctl-guard.path >/dev/null 2>&1 || true
+AWG_BBR_PATH
+    systemctl daemon-reload || return 1
+    systemctl enable --now lucx-awg-sysctl-guard.path || return 1
+    /usr/local/sbin/lucx-awg-sysctl-guard || return 1
 }
 
 patch_panel_bbr_script() {
@@ -5236,75 +4927,19 @@ PY_BBR_PATCH
     done
 }
 
-patch_panel_awg_command() {
-    local script
-    for script in /usr/bin/x-ui /usr/local/x-ui/x-ui.sh; do
-        [[ -f "$script" ]] || continue
-        python3 - "$script" <<'PY_AWG_CMD_PATCH'
-import sys
-path=sys.argv[1]
-text=open(path,encoding="utf-8",errors="surrogateescape").read()
-start=text.find("install_awg_module() {")
-if start < 0:
-    raise SystemExit(0)
-end=text.find("\nuninstall_awg_module()", start)
-if end < 0:
-    raise SystemExit(0)
-block=text[start:end]
-block=block.replace("    /usr/local/sbin/lucx-awg-sysctl-guard >/dev/null 2>&1 || true\n", "    /usr/local/sbin/lucx-awg-sysctl-guard || return 1\n", 1)
-if 'lucx-awg-sysctl-guard' not in block and 'bash "$script" "$@"' in block:
-    block=block.replace(
-        '    bash "$script" "$@"\n',
-        '    /usr/local/sbin/lucx-awg-sysctl-guard || return 1\n'
-        '    bash "$script" "$@"\n'
-        '    local rc=$?\n'
-        '    /usr/local/sbin/lucx-awg-sysctl-guard >/dev/null 2>&1 || true\n'
-        '    return $rc\n',1)
-text=text[:start]+block+text[end:]
-open(path,'w',encoding='utf-8',errors='surrogateescape').write(text)
-PY_AWG_CMD_PATCH
-        chmod +x "$script" 2>/dev/null || true
-    done
-}
 
 install_awg_kernel() {
-    install_awg_compat_support || return 1
     local script="$LUCX_AWG_INSTALLER"
-    [[ -x "$script" ]] || {
-        msg_err "AmneziaWG installer is missing: $script"
-        return 1
-    }
-
-    # Critical: patch the bundled upstream installer BEFORE it can generate
-    # 99-awg-performance.conf. This also protects later x-ui install-awg calls.
-    if ! patch_awg_installer "$script"; then
-        msg_err "Failed to make the AmneziaWG installer BBR-neutral."
-        return 1
-    fi
-
-    install_awg_sysctl_guard || return 1
-    sanitize_awg_sysctl_file
-
-    msg_inf "Installing AmneziaWG kernel module/tools via bundled LucX installer..."
-    local -a awg_install_args=()
-    # Maintenance must not silently upgrade the VPS kernel.
-    [[ "${UPDATE_COMPAT:-}" != "y" ]] || awg_install_args+=(--no-kernel-upgrade)
-    if ! bash "$script" "${awg_install_args[@]}"; then
-        if [[ "${UPDATE_COMPAT:-}" != y ]] && python3 /usr/local/lib/lucx-ui-pro/awg-compat.py reboot-required; then
-            msg_inf "AmneziaWG собран для нового ядра. Для запуска нужна перезагрузка; сборка не сломана."
-            return 0
-        fi
-        msg_err "AmneziaWG installation failed; panel installation will continue, but AWG may be unavailable."
-        AWG_INSTALL_FAILED=1
-        return 0
-    fi
-
-    # The official installer may have refreshed the performance file. Sanitize
-    # it once more and then let the panel-owned BBR state win.
+    [[ -x "$script" ]] || return 1
     patch_awg_installer "$script" || return 1
-    sanitize_awg_sysctl_file
-    install_awg_sysctl_guard || return 1
-    return 0
+    msg_inf "Installing AmneziaWG via the original LucX installer..."
+    local rc=0
+    bash "$script" || rc=$?
+    sanitize_awg_sysctl_file || return 1
+    if (( rc != 0 )); then
+        msg_err "Author's AWG installer failed (exit $rc)."
+        return "$rc"
+    fi
 }
 
 maybe_reboot_for_awg() {
@@ -5772,7 +5407,6 @@ main() {
     # AWG is optional on a fresh install. The guard and panel wrapper are
     # installed regardless, so a later `x-ui install-awg` remains BBR-neutral.
     install_awg_sysctl_guard || return 1
-    patch_panel_awg_command
     if [[ "${DEPLOY_AWG}" == "y" ]]; then
         install_awg_kernel || return 1
     else
@@ -5793,7 +5427,6 @@ main() {
     install_tproxy_site || return 1
     tune_system || return 1
     patch_panel_bbr_script
-    patch_panel_awg_command
     setup_cron || return 1
     setup_firewall || return 1
     if [[ "${DEPLOY_RKN}" == "1" || "${DEPLOY_RKN}" == "2" ]]; then
@@ -5810,7 +5443,7 @@ main() {
     insert_hy2_inbound || return 1
     insert_extra_inbound || return 1
     restart_xui_wait || return 1
-    # Final service state is authoritative after the readiness helper.
+    # Final service state is authoritative after final configuration.
     if ! systemctl is-active --quiet x-ui; then
         msg_err "LucX-UI failed to stay active after final configuration."
         systemctl status x-ui --no-pager -l 2>/dev/null || true
@@ -5824,19 +5457,6 @@ main() {
     clear_install_in_progress
     printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
     if [[ "${DEPLOY_AWG}" == "y" ]]; then
-        # The installer already printed the AWG report. Keep this final check
-        # silent so panel/Telegram credentials remain the final results screen.
-        python3 /usr/local/lib/lucx-ui-pro/awg-compat.py ready >/dev/null || AWG_INSTALL_FAILED=1
-        if [[ "$AWG_INSTALL_FAILED" -eq 1 ]]; then
-            if python3 /usr/local/lib/lucx-ui-pro/awg-compat.py reboot-required; then
-                msg_inf "Панель установлена. AWG собран для нового ядра, но ещё не работает: нужна перезагрузка."
-                maybe_reboot_for_awg
-                return 0
-            fi
-            msg_err "Panel installed; AWG readiness is incomplete. See /var/lib/lucx-ui-pro/awg-readiness.json."
-            msg_inf "A reboot alone does not repair a missing module build. Review the reported status first."
-            return 1
-        fi
         maybe_reboot_for_awg
     fi
 }

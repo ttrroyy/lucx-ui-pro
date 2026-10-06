@@ -8,21 +8,42 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.05-280.6'
-PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc')"
+REVISION = '2026.10.06-281.1'
+PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
 def client_sync_sql(client_columns=(), link_columns=('client_id', 'inbound_id')):
     # Rebuild from normalized records, not an email snapshot of a deleted row.
+    fields = ["'email',c.email", "'enable',json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)"]
+    # A settings save still feeds these cached clients through SyncInbound.
+    # Preserve the normalized identity, limits and credentials in that cache.
+    mapping = {'uuid':'id','sub_id':'subId','password':'password','auth':'auth',
+               'flow':'flow','security':'security','wg_private_key':'privateKey',
+               'wg_public_key':'publicKey','wg_pre_shared_key':'preSharedKey',
+               'wg_keep_alive':'keepAlive','wg_forwarded_ports':'forwardedPorts',
+               'secret':'secret','ad_tag':'adTag','limit_ip':'limitIp',
+               'total_gb':'totalGB','expiry_time':'expiryTime','tg_id':'tgId',
+               'group_name':'group','comment':'comment','reset':'reset',
+               'reset_day':'resetDay','reset_weekday':'resetWeekday','reset_max':'resetMax',
+               'traffic_reset':'trafficReset','traffic_reset_day':'trafficResetDay',
+               'created_at':'created_at','updated_at':'updated_at'}
+    for column, key in mapping.items():
+        if column in client_columns:
+            fields.append(f"'{key}',c.\"{column}\"")
+    if 'reverse' in client_columns:
+        fields.append("'reverse',json(CASE WHEN json_valid(c.reverse) THEN c.reverse ELSE 'null' END)")
+    if 'wg_allowed_ips' in client_columns:
+        fields.append("""'allowedIPs',json(CASE WHEN COALESCE(c.wg_allowed_ips,'')='' THEN '[]'
+          ELSE '[' || replace(json_quote(c.wg_allowed_ips),',','","') || ']' END)""")
+    client_json = 'json_object(' + ','.join(fields) + ')'
     rebuild = """UPDATE inbounds SET settings = json_set(
       CASE WHEN json_valid(settings) THEN settings ELSE '{}' END, '$.clients',
-      json(COALESCE((SELECT json_group_array(json_object(
-        'email', c.email, 'enable', json(CASE WHEN c.enable THEN 'true' ELSE 'false' END)))
+      json(COALESCE((SELECT json_group_array(%s)
         FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
         WHERE ci.inbound_id=inbounds.id AND c.email != ''), '[]')))
-      WHERE protocol IN %s""" % PROTOCOLS
+      WHERE protocol IN %s""" % (client_json, PROTOCOLS)
     sql = 'BEGIN IMMEDIATE;\n'
-    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete', 'rename_merge'):
+    for name in ('ins', 'del', 'link_update', 'client_update', 'client_delete', 'inbound_delete', 'rename_merge', 'inbound_update'):
         sql += f'DROP TRIGGER IF EXISTS lucx_shareonly_clients_{name};\n'
     # Old Pro component removals and old archives can leave dangling links.
     sql += ('DELETE FROM client_inbounds WHERE client_id NOT IN (SELECT id FROM clients) '
@@ -65,11 +86,21 @@ def client_sync_sql(client_columns=(), link_columns=('client_id', 'inbound_id'))
         ('del', 'AFTER DELETE ON client_inbounds', 'id=OLD.inbound_id'),
         ('link_update', 'AFTER UPDATE OF client_id,inbound_id ON client_inbounds',
          'id IN (OLD.inbound_id,NEW.inbound_id)'),
-        ('client_update', 'AFTER UPDATE OF email,enable ON clients',
+        ('client_update', 'AFTER UPDATE ON clients',
          'id IN (SELECT inbound_id FROM client_inbounds WHERE client_id=NEW.id)'),
     ):
         sql += (f'CREATE TRIGGER lucx_shareonly_clients_{name} {event} BEGIN\n'
                 + rebuild + ' AND ' + predicate + ';\nEND;\n')
+    # A sidecar settings save can replace our cache with stale form clients.
+    # Reconcile from normalized memberships only when the cache differs; this
+    # predicate also terminates recursion when recursive_triggers is enabled.
+    normalized = """COALESCE((SELECT json_group_array(%s)
+      FROM clients c JOIN client_inbounds ci ON ci.client_id=c.id
+      WHERE ci.inbound_id=NEW.id AND c.email!=''),'[]')""" % client_json
+    sql += (f'CREATE TRIGGER lucx_shareonly_clients_inbound_update AFTER UPDATE OF settings ON inbounds '
+            f'WHEN NEW.protocol IN {PROTOCOLS} AND json_valid(NEW.settings) '
+            f"AND COALESCE(json_extract(NEW.settings,'$.clients'),'') != {normalized} BEGIN\n"
+            + rebuild + ' AND id=NEW.id;\nEND;\n')
     # BEFORE preserves the email until join-delete triggers finish; unrelated
     # inbounds/clients are never removed. Handles direct SQL component removal too.
     sql += '''CREATE TRIGGER lucx_shareonly_clients_client_delete BEFORE DELETE ON clients
@@ -95,7 +126,7 @@ def sync_clients(db):
 def detach_pro_triggers(db):
     # Never touch triggers belonging to the panel or another application.
     for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
-        if re.fullmatch(r'lucx_shareonly_clients_(ins|del|link_update|client_update|client_delete|inbound_delete|rename_merge)', name):
+        if re.fullmatch(r'lucx_shareonly_clients_(ins|del|link_update|client_update|client_delete|inbound_delete|rename_merge|inbound_update)', name):
             db.execute('DROP TRIGGER "' + name + '"')
     db.commit()
 
@@ -208,7 +239,7 @@ def protected_state(root):
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):
                         raise RuntimeError('Unknown inbound settings layout')
-                    if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc'):
+                    if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux'):
                         settings.pop('clients', None)  # Derived from normalized memberships.
                     if row['protocol'] == 'csqtt':
                         settings.pop('routeThroughXray', None)  # The announced Pro direct repair.
@@ -313,7 +344,7 @@ def verify_state(root, state, before_repair=False):
 
 
 def adapt_updater(path):
-    """Keep the author's updater; suppress its setup wizard and defer AWG."""
+    """Keep the author's updater; suppress its setup wizard; retain native AWG."""
     text = path.read_text(encoding='utf-8')
     config = '    config_after_update\n'
     awg = '        bash "${awg_installer}" ||'
@@ -328,8 +359,17 @@ def adapt_updater(path):
             raise RuntimeError('Native updater start contract changed')
         text = text.replace(line, '        : # Pro starts panel after migration checks\n')
 
-    # Build/check once, under the Pro BBR guard, using the NEW bundled installer.
-    text = text.replace(awg, '        true ||', 1)
+    # Respect installations whose initial selector skipped AWG. When enabled,
+    # execute the author's original call with only the BBR assignments removed.
+    pattern = r'(?m)^        bash "\$\{awg_installer\}" \|\|[^\n]*\n'
+    def native_awg(match):
+        return ('        if [[ "${LUCX_PRO_AWG_ENABLED:-1}" == 1 ]]; then\n'
+                '            /usr/local/sbin/lucx-awg-sysctl-guard || exit 1\n'
+                + match.group(0).replace(' ||', ' || {', 1).rstrip('\n') + '; exit 1; }\n'
+                + '        fi\n')
+    text, count = re.subn(pattern, native_awg, text)
+    if count != 1:
+        raise RuntimeError('Native AWG update contract changed')
     path.write_text(text, encoding='utf-8', newline='\n')
 
 
@@ -445,7 +485,7 @@ def inspect(root):
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
         print('Осиротевшие связи:', dangling)
     for name, relative in (
-        ('AWG guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
+        ('AWG BBR guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
         ('Clash renderer', 'etc/systemd/system/lucx-clash-sub.service'),
         ('AdGuard', 'opt/AdGuardHome'), ('RKN guard', 'usr/local/bin/rkn-guard'),
         ('BBR панели', 'etc/sysctl.d/99-bbr-x-ui.conf'),
@@ -453,7 +493,7 @@ def inspect(root):
         ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
     ):
         print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
-    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, AWG guard, таймеры RKN.')
+    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, исключение BBR из AWG, таймеры RKN.')
     print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
     print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
 

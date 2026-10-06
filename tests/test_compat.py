@@ -44,25 +44,6 @@ class ClientLinks(unittest.TestCase):
                 self.assertIn('OnActiveSec='+delay,text);self.assertNotIn('OnBootSec=',text)
             self.assertEqual(custom.read_text(),'OnBootSec=15min\n')
 
-    def test_awg_reboot_pending_is_not_a_failed_build(self):
-        spec=importlib.util.spec_from_file_location('awg_compat',repo/'assets/compat/awg-compat.py')
-        awg=importlib.util.module_from_spec(spec);spec.loader.exec_module(awg)
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder)
-            marker=root/'etc/x-ui/.awg-reboot-needed';marker.parent.mkdir(parents=True);marker.touch()
-            report=root/'report.json'
-            data={'current_kernel':'6.12.63','installer_exit':0,'errors':[], 'tools_available':True,
-                  'required_modules':{'6.12.63':False,'6.12.111':True}}
-            def mapped_path(*parts):
-                path=Path(*parts)
-                return root/str(path).lstrip('/\\') if str(parts[0]).startswith('/') else path
-            with patch.object(awg,'REPORT',report),patch.object(awg,'Path',mapped_path),patch.object(awg.os,'uname',return_value=SimpleNamespace(release='6.12.63'),create=True):
-                report.write_text(json.dumps(data));self.assertTrue(awg.reboot_required())
-                for key,value in [('installer_exit',1),('errors',['compile failed']),('tools_available',False),('required_modules',{'6.12.63':False,'6.12.111':False})]:
-                    changed=dict(data);changed[key]=value;report.write_text(json.dumps(changed));self.assertFalse(awg.reboot_required())
-                report.write_text(json.dumps(data));headers=root/'lib/modules/6.12.63/build';headers.mkdir(parents=True)
-                self.assertFalse(awg.reboot_required())
-
     def test_panel_share_only_rename_sequence_keeps_original_identity(self):
         for recursive in (0, 1):
             with self.subTest(recursive=recursive), closing(sqlite3.connect(':memory:')) as db:
@@ -83,7 +64,7 @@ class ClientLinks(unittest.TestCase):
                 self.assertEqual(db.execute('SELECT * FROM clients').fetchall(), [(1,'renamed',0,'uuid','sub',200)])
                 self.assertEqual(db.execute('SELECT client_id,inbound_id FROM client_inbounds').fetchall(),[(1,1),(1,2),(1,3)])
                 for (settings,) in db.execute('SELECT settings FROM inbounds'):
-                    self.assertEqual(json.loads(settings)['clients'],[{'email':'renamed','enable':False}])
+                    self.assertEqual(json.loads(settings)['clients'],[{'email':'renamed','enable':False,'id':'uuid','subId':'sub','totalGB':200}])
                 # A different identity must never be silently merged.
                 db.execute("INSERT INTO clients VALUES(3,'occupied',1,'other','other',300)")
                 with self.assertRaises(sqlite3.IntegrityError):
@@ -146,8 +127,8 @@ class ClientLinks(unittest.TestCase):
             text = (repo / relative).read_text(encoding='utf-8')
             actual = text.split("<<'PY_PRO_COMPAT'\n", 1)[1].split('\nPY_PRO_COMPAT', 1)[0]
             self.assertEqual(expected, actual)
-            awg = text.split("<<'PY_LUCX_AWG_COMPAT'\n", 1)[1].split('\nPY_LUCX_AWG_COMPAT', 1)[0]
-            self.assertEqual((repo / 'assets/compat/awg-compat.py').read_text(encoding='utf-8').rstrip(), awg)
+            awg = text.split("<<'PY_LUCX_AWG_BBR'\n", 1)[1].split('\nPY_LUCX_AWG_BBR', 1)[0]
+            self.assertEqual((repo / 'assets/compat/awg-bbr.py').read_text(encoding='utf-8').rstrip(), awg)
 
     def test_native_provider_bypasses_renderer_and_forwarding_retirement(self):
         route = compat.provider_route({'subClashPath': '/mihomo/', 'subPort': '2096',

@@ -4,7 +4,7 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 helper = (root / 'assets/compat/pro-compat.py').read_text(encoding='utf-8').rstrip()
-awg = (root / 'assets/compat/awg-compat.py').read_text(encoding='utf-8').rstrip()
+awg = (root / 'assets/compat/awg-bbr.py').read_text(encoding='utf-8').rstrip()
 logs = (root / 'assets/compat/log-policy.py').read_text(encoding='utf-8').rstrip()
 for relative in ('lucx-ui-latest.sh', 'assets/backup/lucx-ui-backup.sh'):
     path = root / relative
@@ -15,12 +15,12 @@ for relative in ('lucx-ui-latest.sh', 'assets/backup/lucx-ui-backup.sh'):
     before, tail = text.split(marker, 1)
     _, after = tail.split('\nPY_PRO_COMPAT\n', 1)
     text = before + marker + helper + '\nPY_PRO_COMPAT\n' + after
-    marker = "<<'PY_LUCX_AWG_COMPAT'\n"
+    marker = "<<'PY_LUCX_AWG_BBR'\n"
     if text.count(marker) != 1:
         raise SystemExit(f'Expected exactly one AWG helper in {relative}')
     before, tail = text.split(marker, 1)
-    _, after = tail.split('\nPY_LUCX_AWG_COMPAT\n', 1)
-    text = before + marker + awg + '\nPY_LUCX_AWG_COMPAT\n' + after
+    _, after = tail.split('\nPY_LUCX_AWG_BBR\n', 1)
+    text = before + marker + awg + '\nPY_LUCX_AWG_BBR\n' + after
     marker = "<<'PY_LUCX_LOG_POLICY'\n"
     if text.count(marker) != 1:
         raise SystemExit(f'Expected exactly one log policy helper in {relative}')

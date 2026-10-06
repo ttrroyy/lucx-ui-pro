@@ -123,20 +123,14 @@ class UpdateCompatibility(unittest.TestCase):
             path.write_text(original)
             compat.adapt_updater(path)
             self.assertIn('"${xui_folder}/x-ui" migrate || exit 1',path.read_text())
-            self.assertNotIn('bash "${awg_installer}"',path.read_text())
+            self.assertIn('bash "${awg_installer}"',path.read_text())
+            self.assertIn('LUCX_PRO_AWG_ENABLED',path.read_text())
             changed=original.replace('config_after_update','new_setup_function')
             path.write_text(changed)
             with self.assertRaisesRegex(RuntimeError,'contract changed'):
                 compat.adapt_updater(path)
             self.assertEqual(path.read_text(),changed)
 
-    def test_future_awg_skips_legacy_core_patch(self):
-        spec=importlib.util.spec_from_file_location('awg',repo/'assets/compat/awg-compat.py')
-        awg=importlib.util.module_from_spec(spec);spec.loader.exec_module(awg)
-        with patch.object(awg,'run',return_value=SimpleNamespace(returncode=0,stdout='3.10.0-lucx.281\n')):
-            self.assertFalse(awg.legacy_panel())
-        with patch.object(awg,'run',return_value=SimpleNamespace(returncode=0,stdout='3.9.0-lucx.280\n')):
-            self.assertTrue(awg.legacy_panel())
 
 
 if __name__ == '__main__':
