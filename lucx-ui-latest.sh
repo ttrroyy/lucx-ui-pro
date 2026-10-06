@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.06-281.2"
+PRO_COMPAT_REVISION="2026.10.06-286.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -745,8 +745,8 @@ update_compatibility() (
     python3 - "$installed" <<'PY_MIN_UPDATE'
 import re,sys
 m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-lucx\.(\d+)',sys.argv[1])
-if not m or tuple(map(int,m.groups())) < (3,9,0,281):
-    raise SystemExit('Функция -update не поддерживается на данной версии панели. Требуется v3.9.0-lucx.281 или новее.')
+if not m or tuple(map(int,m.groups())) < (3,9,0,286):
+    raise SystemExit('Функция -update не поддерживается на данной версии панели. Требуется v3.9.0-lucx.286 или новее.')
 PY_MIN_UPDATE
     [[ $? -eq 0 ]] || return 1
     fetch_release_info latest "$stage/latest.json" || return 1
@@ -2095,7 +2095,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.06-281.2'
+REVISION = '2026.10.06-286.1'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
