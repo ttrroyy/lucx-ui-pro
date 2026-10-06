@@ -69,7 +69,7 @@ bash /root/lucx-ui-latest.sh -update y -version v3.9.0-lucx.281
 
 > `-install y` выполняет полную переустановку с удалением прежних данных после подтверждения. Для обновления используйте `-update y`.
 
-**Полное удаление (панель + nginx + AdGuard + rkn-guard + tg-web-proxy)**
+**Полное удаление**
 
 ```bash
 bash lucx-ui-latest.sh -uninstall y
