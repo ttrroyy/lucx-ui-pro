@@ -89,8 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-CHECK_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.06-281.1"
+PRO_COMPAT_REVISION="2026.10.06-281.2"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -544,7 +543,6 @@ usage() {
 Usage:
   bash lucx-ui-latest.sh -install y [options]
   bash lucx-ui-latest.sh -update y [-version v3.9.0-lucx.280]
-  bash lucx-ui-latest.sh -check y [-version v3.9.0-lucx.280]
   bash lucx-ui-latest.sh -uninstall y
   bash lucx-ui-latest.sh -adguard y
   bash lucx-ui-latest.sh -adguard-uninstall y
@@ -566,7 +564,6 @@ require_arg_value() {
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -update)           require_arg_value "$@"; UPDATE_COMPAT="$2";      shift 2 ;;
-        -check)            require_arg_value "$@"; CHECK_COMPAT="$2";       shift 2 ;;
         -install)          require_arg_value "$@"; INSTALL="$2";            shift 2 ;;
         -ONLY_CF_IP_ALLOW) require_arg_value "$@"; CFALLOW="$2";            shift 2 ;;
         -version)          require_arg_value "$@"; PANEL_VERSION="$2";      shift 2 ;;
@@ -582,7 +579,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-for _action_value in "$UPDATE_COMPAT" "$CHECK_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
     [[ -z "$_action_value" || "$_action_value" == "y" ]] || {
@@ -597,7 +594,7 @@ done
 }
 
 _action_count=0
-for _action_value in "$UPDATE_COMPAT" "$CHECK_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
     [[ "$_action_value" == "y" ]] && _action_count=$((_action_count + 1))
@@ -745,6 +742,13 @@ update_compatibility() (
     flock -n 9 || { msg_err 'Другое обновление уже запущено.'; return 1; }
     installed=$(/usr/local/x-ui/x-ui -v) || return 1
     installed="v${installed#v}"
+    python3 - "$installed" <<'PY_MIN_UPDATE'
+import re,sys
+m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-lucx\.(\d+)',sys.argv[1])
+if not m or tuple(map(int,m.groups())) < (3,9,0,281):
+    raise SystemExit('Функция -update не поддерживается на данной версии панели. Требуется v3.9.0-lucx.281 или новее.')
+PY_MIN_UPDATE
+    [[ $? -eq 0 ]] || return 1
     fetch_release_info latest "$stage/latest.json" || return 1
     latest=$(release_tag "$stage/latest.json") || return 1
     target="${PANEL_VERSION:-latest}"
@@ -782,45 +786,28 @@ PY_PRO_COMMIT
     echo "AWG модуль на диске: $(modinfo -F version amneziawg 2>/dev/null || echo 'не установлен')"
     echo "AWG загруженный модуль: $(cat /sys/module/amneziawg/version 2>/dev/null || echo 'не загружен')"
     command -v dkms >/dev/null && dkms status amneziawg 2>/dev/null || true
-    [[ "$CHECK_COMPAT" != y ]] || return 0
     if ! grep -qx "PRO_COMPAT_REVISION=\"$PRO_COMPAT_REVISION\"" "$stage/latest-pro.sh"; then
         msg_err 'Логика запущенного скрипта отличается от GitHub. Запустите свежую команду из README.'
         return 1
     fi
+    if [[ "$installed" == "$target" ]]; then
+        echo "Текущая версия: $installed$([[ "$installed" != "$latest" ]] || printf ' (latest)')"
+        msg_inf 'Целевая версия уже установлена. Обновление не требуется.'
+        return 0
+    fi
     while true; do
-        echo
         msg_err 'Обновление остановит панель и VPN-соединения. Сначала будет создан полный backup.'
-        if [[ "$installed" == "$latest" ]]; then
-            echo "Текущая версия: $installed (latest)"
-        else
-            echo "Текущая версия: $installed"
-        fi
-        if [[ "$installed" == "$target" ]]; then
-            echo "  1) Исправить совместимость текущей панели $installed без обновления бинарника"
-            echo '  2) Отмена'
-            menu_prompt='Выбор [1-2]: '
-        else
-            echo "  1) Обновить панель до $target и исправить совместимость"
-            echo "  2) Исправить совместимость текущей панели $installed без обновления бинарника"
-            echo '  3) Отмена'
-            menu_prompt='Выбор [1-3]: '
-        fi
+        echo "Текущая версия: $installed$([[ "$installed" != "$latest" ]] || printf ' (latest)')"
+        echo "  1) Обновить панель до $target"
+        echo '  2) Отмена'
         if [[ -t 0 && -r /dev/tty ]]; then
-            read -r -p "$menu_prompt" choice </dev/tty || return 0
+            read -r -p 'Выбор [1-2]: ' choice </dev/tty || return 0
         else
-            read -r -p "$menu_prompt" choice || return 0
-        fi
-        if [[ "$installed" == "$target" ]]; then
-            case "${choice// /}" in
-                1) choice=2 ;;
-                2) choice=3 ;;
-                *) continue ;;
-            esac
+            read -r -p 'Выбор [1-2]: ' choice || return 0
         fi
         case "${choice// /}" in
             1) UPDATE_TARGET="$target"; break ;;
-            2) UPDATE_TARGET="$installed"; break ;;
-            3) msg_inf 'Обновление отменено. Панель не изменена.'; return 0 ;;
+            2) msg_inf 'Обновление отменено. Панель не изменена.'; return 0 ;;
             *) continue ;;
         esac
     done
@@ -833,9 +820,9 @@ def build(tag):
         raise SystemExit('Unknown installed version; automatic update refused')
     return tuple(int(part) for part in match.groups())
 if build(sys.argv[2]) == build(sys.argv[1]):
-    raise SystemExit('Panel version already installed; choose compatibility repair')
+    raise SystemExit('Panel version already installed; update refused')
 if build(sys.argv[2]) < build(sys.argv[1]):
-    raise SystemExit('Downgrade refused; choose compatibility repair for the current version')
+    raise SystemExit('Downgrade refused; update refused')
 PY_NO_DOWNGRADE
         [[ $? -eq 0 ]] || return 1
         stage_panel_update "$stage/target.json" "$stage" || return 1
@@ -903,7 +890,7 @@ PY_UPDATE_CERT_FILES
         }
     done
     # Capture after stopping the panel: counters/DB cannot race the snapshot.
-    if ! run_pro_compat capture --state "$stage/protected-state.json"; then
+    if ! run_pro_compat capture-update --state "$stage/protected-state.json"; then
         (( was_active == 0 )) || systemctl start x-ui
         return 1
     fi
@@ -931,7 +918,6 @@ PY_UPDATE_CERT_FILES
                "$(sha256sum "$stage/release/x-ui/x-ui" | awk '{print $1}')" ]] || failed=1
         fi
     fi
-    (( failed )) || run_pro_compat preserve-flow --state "$stage/protected-state.json" || failed=1
     (( failed )) || run_pro_compat verify --state "$stage/protected-state.json" --before-repair || failed=1
     (( failed )) || run_pro_compat probe || failed=1
     (( failed )) || run_pro_compat apply || failed=1
@@ -940,9 +926,6 @@ PY_UPDATE_CERT_FILES
     (( failed )) || /usr/local/sbin/lucx-awg-sysctl-guard || failed=1
     if (( failed == 0 )); then
         patch_panel_bbr_script || failed=1
-        if [[ "${choice// /}" == 2 ]] && (( awg_present )); then
-            install_awg_kernel || failed=1
-        fi
     fi
     # Restore the operator's runtime choice even if native AWG changed it.
     sysctl -w "net.ipv4.tcp_congestion_control=$saved_cc" "net.core.default_qdisc=$saved_qdisc" >/dev/null || failed=1
@@ -1018,7 +1001,7 @@ PY_UPDATE_CERT_FILES
     printf '%s\n' "$script_commit" > "$PREINSTALL_STATE_DIR/pro-commit" || return 1
     setup_cron || return 1
     setup_fail2ban || true
-    msg_ok "Совместимость исправлена. Панель: $UPDATE_TARGET. Backup: /var/backups/x-ui."
+    msg_ok "Обновление завершено. Панель: $UPDATE_TARGET. Backup: /var/backups/x-ui."
 )
 
 # ─── AmneziaWG install choice (must be the first install question) ────────────
@@ -2112,7 +2095,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.06-281.1'
+REVISION = '2026.10.06-281.2'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -2305,7 +2288,7 @@ def meaningful_json(value):
     return value
 
 
-def protected_state(root):
+def protected_state(root, update_only=False):
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise RuntimeError('Panel database integrity check failed')
@@ -2321,6 +2304,8 @@ def protected_state(root):
             ('users', ('id','username','password')),
             ('client_inbounds', ('client_id','inbound_id','flow_override')),
         ):
+            if update_only and table == 'users':
+                continue
             columns = {r[1] for r in db.execute('PRAGMA table_info(' + table + ')')}
             required = {'clients': {'id','email','enable'}, 'inbounds': {'id','protocol','settings'},
                         'users': {'id','username','password'}, 'client_inbounds': {'client_id','inbound_id'}}[table]
@@ -2339,6 +2324,8 @@ def protected_state(root):
                     if key == 'wg_keep_alive':
                         row[key] = str(row[key])
             if table == 'inbounds':
+                if update_only:
+                    rows = [row for row in rows if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
                 for row in rows:
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):
@@ -2372,7 +2359,19 @@ def protected_state(root):
             if not file.is_file():
                 raise RuntimeError('Configured certificate/key is missing')
             files[file.relative_to(root).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
-    return {'tables': tables, 'settings': saved_settings, 'files': files}
+    if update_only:
+        # Protect only identities and memberships used by Pro client triggers.
+        # Native protocol settings and client fields may migrate upstream.
+        tables['clients'] = [{'id': r['id'], 'email': r['email']} for r in tables['clients']]
+        tables['inbounds'] = [{'id': r['id'], 'protocol': r['protocol']} for r in tables['inbounds']]
+        share_ids = {r['id'] for r in tables['inbounds']}
+        tables['client_inbounds'] = [{'client_id': r['client_id'], 'inbound_id': r['inbound_id']}
+                                    for r in tables['client_inbounds'] if r['inbound_id'] in share_ids]
+        tables.pop('users', None)
+        saved_settings = {k:v for k,v in saved_settings.items() if k.startswith(('web','sub'))}
+        for rows in tables.values():
+            rows.sort(key=lambda row: json.dumps(row, sort_keys=True))
+    return {'tables': tables, 'settings': saved_settings, 'files': files, 'update_only': update_only}
 
 
 def compare_existing_columns(previous, current):
@@ -2419,7 +2418,7 @@ def preserve_client_flow(root, state):
 
 def verify_state(root, state, before_repair=False):
     previous = json.loads(state.read_text(encoding='utf-8'))
-    current = protected_state(root)
+    current = protected_state(root, previous.get('update_only', False))
     compare_existing_columns(previous, current)
     for section in ('tables','settings','files'):
         for name, value in previous[section].items():
@@ -2442,6 +2441,9 @@ def verify_state(root, state, before_repair=False):
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        if previous.get('update_only'):
+            dangling = db.execute('SELECT COUNT(*) FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id '
+                                  'WHERE i.protocol IN ' + PROTOCOLS + ' AND ci.client_id NOT IN (SELECT id FROM clients)').fetchone()[0]
         if dangling and not before_repair:
             raise RuntimeError('Update left orphaned client memberships')
     print('Protected clients, memberships, accounts, settings and files: preserved.')
@@ -2587,6 +2589,9 @@ def inspect(root):
         print('Синхронизация клиентов:', ', '.join(triggers) or 'отсутствует')
         dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        if previous.get('update_only'):
+            dangling = db.execute('SELECT COUNT(*) FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id '
+                                  'WHERE i.protocol IN ' + PROTOCOLS + ' AND ci.client_id NOT IN (SELECT id FROM clients)').fetchone()[0]
         print('Осиротевшие связи:', dangling)
     for name, relative in (
         ('AWG BBR guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
@@ -2605,7 +2610,7 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
@@ -2614,8 +2619,8 @@ def main():
     root = args.root.resolve()
     if args.action == 'adapt-updater':
         adapt_updater(args.path)
-    elif args.action == 'capture':
-        args.state.write_text(json.dumps(protected_state(root), ensure_ascii=False), encoding='utf-8')
+    elif args.action in ('capture', 'capture-update'):
+        args.state.write_text(json.dumps(protected_state(root, args.action == 'capture-update'), ensure_ascii=False), encoding='utf-8')
         args.state.chmod(0o600)
     elif args.action == 'preserve-flow':
         preserve_client_flow(root, args.state)
@@ -3366,7 +3371,7 @@ fi
 # A normal repeated full installation must start from the same clean state as
 # an explicit "-uninstall y". Component-only maintenance commands are excluded.
 is_full_install_request() {
-    [[ "${UPDATE_COMPAT}" != "y" && "${CHECK_COMPAT}" != "y" &&
+    [[ "${UPDATE_COMPAT}" != "y" &&
        "${ADGUARD_ONLY}" != "y" &&
        "${ADGUARD_UNINSTALL}" != "y" &&
        "${RKN_GUARD_ONLY}" != "y" &&
@@ -3569,7 +3574,7 @@ validate_domains() {
     fi
 }
 # First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
-if [[ "${UPDATE_COMPAT}" != "y" && "${CHECK_COMPAT}" != "y" && "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
+if [[ "${UPDATE_COMPAT}" != "y" && "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
     choose_auto_domains || exit 1
     validate_domains || exit 1
 fi
@@ -5461,12 +5466,12 @@ main() {
     fi
 }
 
-if ! is_full_install_request && [[ "$CHECK_COMPAT" != y && ! -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]]; then
+if ! is_full_install_request && [[ ! -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]]; then
     msg_err "Component maintenance requires an installation owned by this script."
     exit 1
 fi
 
-if [[ "${UPDATE_COMPAT}" == "y" || "${CHECK_COMPAT}" == "y" ]]; then
+if [[ "${UPDATE_COMPAT}" == "y" ]]; then
     update_compatibility
     exit $?
 fi

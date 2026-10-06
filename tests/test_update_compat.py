@@ -31,6 +31,19 @@ def database(root):
 
 
 class UpdateCompatibility(unittest.TestCase):
+    def test_update_scope_allows_native_fields_but_protects_memberships(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            with closing(database(root)) as db:
+                db.execute("ALTER TABLE clients ADD COLUMN wg_keep_alive TEXT DEFAULT '0'");db.commit()
+                state=root/'state.json';state.write_text(json.dumps(compat.protected_state(root, True)))
+                db.execute("UPDATE clients SET wg_keep_alive='25',uuid='native-migration'")
+                db.execute("UPDATE inbounds SET settings='{\"nativeField\":true}'")
+                db.execute("UPDATE users SET password='native-hash'");db.commit()
+                compat.verify_state(root,state)
+                db.execute('DELETE FROM client_inbounds WHERE inbound_id=1');db.commit()
+                with self.assertRaises(RuntimeError):compat.verify_state(root,state)
+
     def test_updater_defers_service_start_until_after_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'update.sh'

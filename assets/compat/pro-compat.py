@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.06-281.1'
+REVISION = '2026.10.06-281.2'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -201,7 +201,7 @@ def meaningful_json(value):
     return value
 
 
-def protected_state(root):
+def protected_state(root, update_only=False):
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise RuntimeError('Panel database integrity check failed')
@@ -217,6 +217,8 @@ def protected_state(root):
             ('users', ('id','username','password')),
             ('client_inbounds', ('client_id','inbound_id','flow_override')),
         ):
+            if update_only and table == 'users':
+                continue
             columns = {r[1] for r in db.execute('PRAGMA table_info(' + table + ')')}
             required = {'clients': {'id','email','enable'}, 'inbounds': {'id','protocol','settings'},
                         'users': {'id','username','password'}, 'client_inbounds': {'client_id','inbound_id'}}[table]
@@ -235,6 +237,8 @@ def protected_state(root):
                     if key == 'wg_keep_alive':
                         row[key] = str(row[key])
             if table == 'inbounds':
+                if update_only:
+                    rows = [row for row in rows if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
                 for row in rows:
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):
@@ -268,7 +272,19 @@ def protected_state(root):
             if not file.is_file():
                 raise RuntimeError('Configured certificate/key is missing')
             files[file.relative_to(root).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
-    return {'tables': tables, 'settings': saved_settings, 'files': files}
+    if update_only:
+        # Protect only identities and memberships used by Pro client triggers.
+        # Native protocol settings and client fields may migrate upstream.
+        tables['clients'] = [{'id': r['id'], 'email': r['email']} for r in tables['clients']]
+        tables['inbounds'] = [{'id': r['id'], 'protocol': r['protocol']} for r in tables['inbounds']]
+        share_ids = {r['id'] for r in tables['inbounds']}
+        tables['client_inbounds'] = [{'client_id': r['client_id'], 'inbound_id': r['inbound_id']}
+                                    for r in tables['client_inbounds'] if r['inbound_id'] in share_ids]
+        tables.pop('users', None)
+        saved_settings = {k:v for k,v in saved_settings.items() if k.startswith(('web','sub'))}
+        for rows in tables.values():
+            rows.sort(key=lambda row: json.dumps(row, sort_keys=True))
+    return {'tables': tables, 'settings': saved_settings, 'files': files, 'update_only': update_only}
 
 
 def compare_existing_columns(previous, current):
@@ -315,7 +331,7 @@ def preserve_client_flow(root, state):
 
 def verify_state(root, state, before_repair=False):
     previous = json.loads(state.read_text(encoding='utf-8'))
-    current = protected_state(root)
+    current = protected_state(root, previous.get('update_only', False))
     compare_existing_columns(previous, current)
     for section in ('tables','settings','files'):
         for name, value in previous[section].items():
@@ -338,6 +354,9 @@ def verify_state(root, state, before_repair=False):
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        if previous.get('update_only'):
+            dangling = db.execute('SELECT COUNT(*) FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id '
+                                  'WHERE i.protocol IN ' + PROTOCOLS + ' AND ci.client_id NOT IN (SELECT id FROM clients)').fetchone()[0]
         if dangling and not before_repair:
             raise RuntimeError('Update left orphaned client memberships')
     print('Protected clients, memberships, accounts, settings and files: preserved.')
@@ -483,6 +502,9 @@ def inspect(root):
         print('Синхронизация клиентов:', ', '.join(triggers) or 'отсутствует')
         dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
+        if previous.get('update_only'):
+            dangling = db.execute('SELECT COUNT(*) FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id '
+                                  'WHERE i.protocol IN ' + PROTOCOLS + ' AND ci.client_id NOT IN (SELECT id FROM clients)').fetchone()[0]
         print('Осиротевшие связи:', dangling)
     for name, relative in (
         ('AWG BBR guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
@@ -501,7 +523,7 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
@@ -510,8 +532,8 @@ def main():
     root = args.root.resolve()
     if args.action == 'adapt-updater':
         adapt_updater(args.path)
-    elif args.action == 'capture':
-        args.state.write_text(json.dumps(protected_state(root), ensure_ascii=False), encoding='utf-8')
+    elif args.action in ('capture', 'capture-update'):
+        args.state.write_text(json.dumps(protected_state(root, args.action == 'capture-update'), ensure_ascii=False), encoding='utf-8')
         args.state.chmod(0o600)
     elif args.action == 'preserve-flow':
         preserve_client_flow(root, args.state)
