@@ -9,7 +9,7 @@
 
 ## Что устанавливается
 
-Поддержка VLESS TCP REALITY, VLESS XHTTP TLS, Telegram WEB-proxy — через порт 443, а так же Hysteria 2, qWDTT и CSQTT
+Поддержка VLESS TCP REALITY, VLESS XHTTP TLS, Telegram WEB-proxy — через порт 443, а так же Hysteria 2, qWDTT, CSQTT и OpenFlux
 
 | Компонент | Описание |
 |-----------|----------|
@@ -26,18 +26,19 @@
 
 ## Установка
 
+Все команды ниже сначала скачивают актуальный скрипт из GitHub. Если скачивание завершится ошибкой, действие не запустится. Само скачивание версию установленной панели не меняет.
+
 **Скачивание и запуск скрипта**
 
 ```bash
-wget -qO lucx-ui-latest.sh https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh
-bash lucx-ui-latest.sh -install y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -install y
 ```
 
-Повторный запуск запускает полное удаление и повторную установку.
+Повторный запуск полностью удаляет прежнюю установку и ставит новую после подтверждения. Клиенты и настройки удаляются; сертификаты сохраняются. Для возврата прежних данных используйте восстановление из backup.
 
 ## Обновление установленной панели
 
-`-update` доступен с **v3.9.0-lucx.286** и новее для установки, созданной lucx-ui-pro. Обновляет панель штатным установщиком и применяет актуальную совместимость нашей схемы.
+`-update` доступен с **v3.9.0-lucx.286** и новее для установки, созданной lucx-ui-pro. Обновляет панель штатным установщиком и применяет актуальную совместимость нашей схемы. На версии ниже 286 команда остановится с сообщением о неподдерживаемой версии, без обновления панели.
 
 **Скачать свежий скрипт и открыть меню обновления:**
 
@@ -47,10 +48,10 @@ curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-la
 
 По умолчанию выбирается последний стабильный релиз AlexeyLCP/lucx-ui. В меню — обновление или отмена. Уже установленная версия повторно не обновляется; понижение блокируется.
 
-**Выбрать конкретный релиз:**
+**Обновить до конкретного релиза** (должен быть новее установленного):
 
 ```bash
-bash /root/lucx-ui-latest.sh -update y -version v3.9.0-lucx.286
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -update y -version v3.9.0-lucx.287
 ```
 
 Перед изменениями создаётся backup в `/var/backups/x-ui`. Проверяются клиентские связи и настройки нашей схемы; остальные поля, которыми управляет автор панели, могут изменяться при штатной миграции. При обнаруженной ошибке возвращаются сохранённые файлы и БД. Системные пакеты и загруженный модуль ядра файловым откатом не возвращаются. Соединения временно прерываются.
@@ -60,7 +61,7 @@ bash /root/lucx-ui-latest.sh -update y -version v3.9.0-lucx.286
 **Полное удаление**
 
 ```bash
-bash lucx-ui-latest.sh -uninstall y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -uninstall y
 ```
 
 ---
@@ -73,7 +74,7 @@ bash lucx-ui-latest.sh -uninstall y
 - **Админка** — на случайном пути `/adg-<random>/` (логин и пароль выводит скрипт)
 
 ```bash
-bash lucx-ui-latest.sh -adguard y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -adguard y
 ```
 
 Повторный запуск безопасен (настройки и пароль сохраняются), он просто перезаписывает nginx.
@@ -81,7 +82,7 @@ bash lucx-ui-latest.sh -adguard y
 Удаление:
 
 ```bash
-bash lucx-ui-latest.sh -adguard-uninstall y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -adguard-uninstall y
 ```
 
 ---
@@ -91,7 +92,7 @@ bash lucx-ui-latest.sh -adguard-uninstall y
 Устанавливает [rkn-guard](https://github.com/Flecksis/rkn-guard) для защиты от сканеров и сетевого шума, настраивает автообновление программы и баз IP-адресов сканеров.
 
 ```bash
-bash lucx-ui-latest.sh -rkn-guard y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -rkn-guard y
 ```
 
 Повторный запуск переустановит программу.
@@ -99,7 +100,7 @@ bash lucx-ui-latest.sh -rkn-guard y
 Удаление:
 
 ```bash
-bash lucx-ui-latest.sh -rkn-guard-uninstall y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -rkn-guard-uninstall y
 ```
 
 ---
@@ -109,7 +110,7 @@ bash lucx-ui-latest.sh -rkn-guard-uninstall y
 Устанавливает [telegram web-proxy](https://github.com/telegramdesktop/tproxy-server) в панель, выдает ссылку для подключения.
 
 ```bash
-bash lucx-ui-latest.sh -tg-web-proxy y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -tg-web-proxy y
 ```
 
 Повторный запуск переустановит Telegram WEB-proxy и выдаст новую ссылку для подключения.
@@ -117,7 +118,7 @@ bash lucx-ui-latest.sh -tg-web-proxy y
 Удаление:
 
 ```bash
-bash lucx-ui-latest.sh -tg-web-proxy-uninstall y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -tg-web-proxy-uninstall y
 ```
 
 ---
@@ -127,12 +128,14 @@ bash lucx-ui-latest.sh -tg-web-proxy-uninstall y
 | Параметр | Описание |
 |----------|----------|
 | `-install y` | Полная установка |
-| `-version <версия>` | Установить конкретную версию lucx-ui (например `v3.8.5-lucx.245`), по умолчанию — последняя |
+| `-version <версия>` | Выбрать релиз для установки или обновления (например `v3.9.0-lucx.286`), по умолчанию — последний стабильный |
+| `-update y` | Обновить установленную через Pro панель версии 286 и новее |
+| `-uninstall y` | Полное удаление установки с сохранением сертификатов |
 | `-adguard y` | Установка AdGuard Home |
 | `-adguard-uninstall y` | Удаление AdGuard Home |
-| `-rkn-guard y` | Устанока rkn-guard |
+| `-rkn-guard y` | Установка rkn-guard |
 | `-rkn-guard-uninstall y` | Удаление rkn-guard |
-| `-tg-web-proxy y` | Устанока tg-web-proxy |
+| `-tg-web-proxy y` | Установка tg-web-proxy |
 | `-tg-web-proxy-uninstall y` | Удаление tg-web-proxy |
 
 ---
@@ -152,26 +155,27 @@ bash lucx-ui-latest.sh -tg-web-proxy-uninstall y
 **Установить скрипт бэкапа**
 
 ```bash
-wget -qO /usr/local/bin/lucx-ui-backup https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh
-chmod +x /usr/local/bin/lucx-ui-backup
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh -o /usr/local/bin/lucx-ui-backup && chmod +x /usr/local/bin/lucx-ui-backup
 ```
+
+Каждая команда ниже скачивает свежую версию скрипта бэкапа; отдельная предварительная установка не требуется.
 
 **Создать бэкап**
 
 ```bash
-lucx-ui-backup backup
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh -o /usr/local/bin/lucx-ui-backup && bash /usr/local/bin/lucx-ui-backup backup
 ```
 
 **Список бэкапов**
 
 ```bash
-lucx-ui-backup list
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh -o /usr/local/bin/lucx-ui-backup && bash /usr/local/bin/lucx-ui-backup list
 ```
 
 **Восстановить из бэкапа** (на чистом сервере, пакеты ставятся автоматически)
 
 ```bash
-lucx-ui-backup restore /var/backups/x-ui/lucx-ui-backup-20260101-120000.tar.gz
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/assets/backup/lucx-ui-backup.sh -o /usr/local/bin/lucx-ui-backup && bash /usr/local/bin/lucx-ui-backup restore /var/backups/x-ui/lucx-ui-backup-20260101-120000.tar.gz
 ```
 
 Бэкап включает: конфиги nginx, БД LucX, бинарник панели, SSL, сайт-заглушка, AdGuard Home, systemd, cron, UFW. На время backup панель коротко останавливается.
