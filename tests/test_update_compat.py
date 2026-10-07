@@ -96,9 +96,9 @@ class UpdateCompatibility(unittest.TestCase):
             with closing(database(root)) as db:
                 site=root/'var/www/site/index.html';site.parent.mkdir(parents=True);site.write_text('site')
                 state=root/'state.json';state.write_text(json.dumps(compat.protected_state(root)))
-                # Announced repairs may rebuild JSON clients/change CSQTT routing.
+                # Derived client caches may be rebuilt; CSQTT routing is preserved.
                 compat.sync_clients(db)
-                db.execute("UPDATE inbounds SET settings=json_set(settings,'$.routeThroughXray',json('false')) WHERE protocol='csqtt'");db.commit()
+                db.commit()
                 compat.verify_state(root,state)
                 site.write_text('lost')
                 with self.assertRaisesRegex(RuntimeError,'protected files'):

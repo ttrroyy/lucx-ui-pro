@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.07-286.2"
+PRO_COMPAT_REVISION="2026.10.07-286.3"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -2100,7 +2100,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.2'
+REVISION = '2026.10.07-286.3'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -2337,8 +2337,6 @@ def protected_state(root, update_only=False):
                         raise RuntimeError('Unknown inbound settings layout')
                     if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux'):
                         settings.pop('clients', None)  # Derived from normalized memberships.
-                    if row['protocol'] == 'csqtt':
-                        settings.pop('routeThroughXray', None)  # The announced Pro direct repair.
                     row['settings'] = meaningful_json(settings)
                     for key in ('stream_settings','sniffing','allocate'):
                         if row.get(key):
@@ -2564,11 +2562,6 @@ def migrate(root, clients_only=False):
             return
         settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
         repair_nginx(root, settings)
-        for row_id, raw in db.execute("SELECT id,settings FROM inbounds WHERE protocol='csqtt'").fetchall():
-            data = json.loads(raw)
-            data['routeThroughXray'] = False
-            db.execute('UPDATE inbounds SET settings=? WHERE id=?',
-                       (json.dumps(data, ensure_ascii=False), row_id))
         db.commit()
     remove_forwarding_override(root)
     repair_rkn_timers(root)
@@ -2588,15 +2581,12 @@ def inspect(root):
             config = data.get('server', data) if protocol == 'amneziawg' else data
             default = protocol == 'qwdtt'
             route = config.get('routeThroughXray', default)
-            change = ' → false (штатный direct)' if protocol == 'csqtt' else ' (сохраняется)'
+            change = ' (сохраняется)'
             print(f'{protocol} #{row_id}: routeThroughXray={route}{change}')
         triggers = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'lucx_shareonly_%'")]
         print('Синхронизация клиентов:', ', '.join(triggers) or 'отсутствует')
         dangling = db.execute('SELECT COUNT(*) FROM client_inbounds WHERE client_id NOT IN '
                               '(SELECT id FROM clients) OR inbound_id NOT IN (SELECT id FROM inbounds)').fetchone()[0]
-        if previous.get('update_only'):
-            dangling = db.execute('SELECT COUNT(*) FROM client_inbounds ci JOIN inbounds i ON i.id=ci.inbound_id '
-                                  'WHERE i.protocol IN ' + PROTOCOLS + ' AND ci.client_id NOT IN (SELECT id FROM clients)').fetchone()[0]
         print('Осиротевшие связи:', dangling)
     for name, relative in (
         ('AWG BBR guard', 'usr/local/sbin/lucx-awg-sysctl-guard'),
@@ -2607,7 +2597,7 @@ def inspect(root):
         ('Сайт заглушка', 'var/lib/lucx-ui-preinstall/cover-generator.json'),
     ):
         print(f'{name}: {"есть" if (root / relative).exists() else "нет"}')
-    print('Правки: связи клиентов, CSQTT direct, native Clash provider, TLS панели, исключение BBR из AWG, таймеры RKN.')
+    print('Правки: связи клиентов, native Clash provider, TLS панели, исключение BBR из AWG, таймеры RKN.')
     print('UFW allow routed сохраняется; правила CSQTT обслуживает панель.')
     print('Аккаунты, порты, DNS и содержимое сайта сохраняются.')
 
