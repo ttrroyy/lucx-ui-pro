@@ -777,7 +777,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.3'
+REVISION = '2026.10.07-286.4'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -1129,6 +1129,39 @@ def verify_state(root, state, before_repair=False):
     print('Protected clients, memberships, accounts, settings and files: preserved.')
 
 
+def restore_sidecars(root, source, destination):
+    """Fill absent files only for Pro-supported, configured sidecar protocols."""
+    import shutil
+    with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db')) as db:
+        protocols = {r[0] for r in db.execute('SELECT DISTINCT protocol FROM inbounds')}
+    prefixes = protocols & {'qwdtt', 'csqtt', 'tproxy', 'olcrtc', 'openflux'}
+    if 'tproxy' in prefixes:
+        prefixes.add('mtproxy')
+    def missing(src, dst):
+        if src.is_symlink() or dst.is_symlink():
+            return
+        if src.is_dir():
+            if dst.exists() and not dst.is_dir():
+                return
+            dst.mkdir(parents=True, exist_ok=True)
+            for child in src.iterdir():
+                missing(child, dst / child.name)
+        elif src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    bins = source / 'bin'
+    if bins.is_symlink() or not bins.is_dir() or (destination / 'bin').is_symlink():
+        return
+    for file in bins.iterdir():
+        if file.is_file() and any(re.fullmatch(re.escape(core) + r'-linux-(?:amd64|arm64|arm|arm32|armv[567]|386)', file.name) for core in prefixes):
+            missing(file, destination / 'bin' / file.name)
+    tunnel = bins / 'tunnel'
+    if tunnel.is_dir() and not tunnel.is_symlink() and not (destination / 'bin/tunnel').is_symlink():
+        for file in tunnel.iterdir():
+            if any(file.name.startswith(core + '-') or file.name.startswith(core + '.') for core in prefixes):
+                missing(file, destination / 'bin/tunnel' / file.name)
+
+
 def adapt_updater(path):
     """Keep the author's updater; suppress its setup wizard; retain native AWG."""
     text = path.read_text(encoding='utf-8')
@@ -1282,14 +1315,17 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'restore-sidecars', 'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
+    parser.add_argument('--source', type=Path)
     parser.add_argument('--before-repair', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.action == 'adapt-updater':
+    if args.action == 'restore-sidecars':
+        restore_sidecars(root, args.source, root / 'usr/local/x-ui')
+    elif args.action == 'adapt-updater':
         adapt_updater(args.path)
     elif args.action in ('capture', 'capture-update'):
         args.state.write_text(json.dumps(protected_state(root, args.action == 'capture-update'), ensure_ascii=False), encoding='utf-8')
@@ -1389,6 +1425,53 @@ if route not in text:
     path.write_text(route + text, encoding='utf-8')
     print('Restored panel Clash link routed to the shared YAML renderer.')
 PY_PANEL_CLASH_ROUTE
+}
+
+save_renewal_state() {
+    local dir="$1" unit
+    mkdir -p "$dir" || return 1
+    if command -v crontab >/dev/null 2>&1 && crontab -l > "$dir/root-crontab" 2>/dev/null; then
+        touch "$dir/crontab-present" || return 1
+    else
+        : > "$dir/root-crontab" || return 1
+    fi
+    for unit in certbot.timer cron; do
+        systemctl is-enabled "$unit" > "$dir/$unit-enabled" 2>/dev/null || true
+        systemctl is-active "$unit" > "$dir/$unit-active" 2>/dev/null || true
+    done
+}
+
+restore_renewal_state() {
+    local dir="$1" unit enabled active failed=0
+    [[ -d "$dir" ]] || return 0
+    if command -v crontab >/dev/null 2>&1; then
+        if [[ -f "$dir/crontab-present" ]]; then
+            crontab "$dir/root-crontab" || failed=1
+        else
+            if crontab -l >/dev/null 2>&1; then
+                crontab -r || failed=1
+            fi
+        fi
+    fi
+    for unit in certbot.timer cron; do
+        enabled=$(cat "$dir/$unit-enabled" 2>/dev/null)
+        active=$(cat "$dir/$unit-active" 2>/dev/null)
+        case "$enabled" in
+            masked*) systemctl mask --now "$unit" >/dev/null 2>&1 || failed=1 ;;
+            *)
+                systemctl unmask "$unit" >/dev/null 2>&1 || failed=1
+                case "$enabled" in
+                    enabled*) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                    disabled) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                esac
+                if [[ "$active" == active ]]; then
+                    systemctl start "$unit" >/dev/null 2>&1 || failed=1
+                elif [[ "$active" != unknown && "$enabled" != not-found && -n "$enabled" ]]; then
+                    systemctl stop "$unit" >/dev/null 2>&1 || failed=1
+                fi ;;
+        esac
+    done
+    return "$failed"
 }
 
 cmd_restore() {
@@ -1719,8 +1802,12 @@ PY_TG_RESTORE
 
     # ── crontab ───────────────────────────────────────────────────────────
     blue "==> Restoring cron..."
-    if [[ -s "${staging}/root-crontab" ]]; then
-        crontab - < "${staging}/root-crontab"
+    save_renewal_state "${staging}/renewal-before" || die "Failed to snapshot renewal scheduler"
+    if [[ -f "${staging}/root-crontab" ]]; then
+        if ! crontab "${staging}/root-crontab"; then
+            restore_renewal_state "${staging}/renewal-before" || true
+            die "Failed to restore root crontab; previous scheduler restored where possible"
+        fi
         green "    Root crontab restored"
     fi
 
@@ -1731,8 +1818,10 @@ PY_TG_RESTORE
 
     # Restored Pro cron owns standalone renewal and the nginx/panel hooks.
     if crontab -l 2>/dev/null | grep -F 'certbot renew' | grep -Fq -- '--pre-hook "systemctl stop nginx"'; then
-        systemctl mask --now certbot.timer || die "Failed to disable competing Certbot timer"
-        systemctl enable --now cron || die "Failed to start renewal cron"
+        if ! { systemctl enable --now cron && systemctl mask --now certbot.timer; }; then
+            restore_renewal_state "${staging}/renewal-before" || true
+            die "Failed to configure renewal scheduler; previous state restored where possible"
+        fi
     fi
 
     # Older archives contain a second RUNET scheduler. Keep the restored .dat
@@ -1743,7 +1832,7 @@ PY_TG_RESTORE
         crontab -l > "$geo_cron" 2>/dev/null || true
         if grep -Eq '^[[:space:]]*[^#].*/usr/local/x-ui/update-geodata\.sh([[:space:];]|$)' "$geo_cron"; then
             awk '/^[[:space:]]*#/ || $0 !~ /\/usr\/local\/x-ui\/update-geodata\.sh([[:space:];]|$)/' "$geo_cron" > "${geo_cron}.new"
-            crontab "${geo_cron}.new" || die "Failed to remove legacy RUNET cron"
+            crontab "${geo_cron}.new" || { restore_renewal_state "${staging}/renewal-before" || true; die "Failed to remove legacy RUNET cron"; }
         fi
         rm -f "$geo_cron" "${geo_cron}.new"
     fi

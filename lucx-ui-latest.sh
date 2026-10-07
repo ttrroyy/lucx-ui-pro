@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.07-286.3"
+PRO_COMPAT_REVISION="2026.10.07-286.4"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -421,6 +421,7 @@ save_preinstall_state() {
     systemctl is-enabled --quiet nginx && touch "$dir/nginx-enabled" || true
     systemctl is-active --quiet nginx && touch "$dir/nginx-active" || true
     crontab -l > "$dir/root-crontab" 2>/dev/null || : > "$dir/root-crontab"
+    save_renewal_state "$dir/renewal-baseline" || return 1
     sysctl -n net.core.default_qdisc > "$dir/qdisc" 2>/dev/null || true
     sysctl -n net.ipv4.tcp_congestion_control > "$dir/congestion-control" 2>/dev/null || true
     save_firewall_state || return 1
@@ -455,6 +456,7 @@ restore_preinstall_state() {
     sysctl -w "net.core.default_qdisc=$(cat "$dir/qdisc")" >/dev/null 2>&1 || true
     sysctl -w "net.ipv4.tcp_congestion_control=$(cat "$dir/congestion-control")" >/dev/null 2>&1 || true
     restore_firewall_state
+    restore_renewal_state "$dir/renewal-baseline" || return 1
     if [[ -f "$dir/nginx-enabled" ]]; then systemctl enable nginx >/dev/null 2>&1 || true
     else systemctl disable nginx >/dev/null 2>&1 || true; fi
     if [[ -f "$dir/nginx-active" ]]; then systemctl start nginx >/dev/null 2>&1 || true; fi
@@ -879,6 +881,7 @@ PY_UPDATE_CERT_FILES
     systemctl is-active --quiet lucx-awg-sysctl-guard.path && guard_active=1
     systemctl is-active --quiet lucx-log-policy.timer && logs_active=1
     if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/x-ui/.awg-module-version ]]; then awg_present=1; fi
+    save_renewal_state "$stage/renewal-before" || return 1
     systemctl stop x-ui || return 1
     # Rollback storage includes DB + helpers + nginx/UFW and service definitions;
     # panel migrations can change SQLite schema, so binary-only rollback is unsafe.
@@ -908,9 +911,9 @@ PY_UPDATE_CERT_FILES
             env LUCX_PRO_AWG_ENABLED="$awg_present" XUI_UPDATE_TAG="$UPDATE_TARGET" XUI_UPDATE_STATUS_FILE="$stage/native-status.json" \
             bash "$stage/native-update.sh" </dev/null || failed=1
         systemctl stop x-ui || failed=1
-        # Stock updater removes some sidecar directories. Restore absent files
-        # without overwriting new release binaries, then verify the result.
-        (( failed )) || cp -an "$stage/rollback/usr/local/x-ui/." /usr/local/x-ui/ || failed=1
+        # Restore only missing configured Pro sidecar binaries/state; never
+        # resurrect panel files or scripts removed by the new release.
+        (( failed )) || run_pro_compat restore-sidecars --source "$stage/rollback/usr/local/x-ui" || failed=1
         if (( failed == 0 )); then
             local actual
             actual=$(/usr/local/x-ui/x-ui -v) || failed=1
@@ -952,6 +955,7 @@ PY_UPDATE_CERT_FILES
         else systemctl disable x-ui >/dev/null || failed=1; fi
     fi
     (( failed )) || run_log_policy install || failed=1
+    (( failed )) || setup_cron || failed=1
     if (( failed )); then
         msg_err 'Обновление не прошло проверку. Возвращаем файлы, DB и бинарники из локального снимка.'
         systemctl stop x-ui || true
@@ -995,12 +999,12 @@ PY_UPDATE_CERT_FILES
         if (( guard_active )); then systemctl start lucx-awg-sysctl-guard.path || true; fi
         systemctl restart systemd-journald.service || true
         if (( logs_active )); then systemctl start lucx-log-policy.timer || true; fi
+        restore_renewal_state "$stage/renewal-before" || { msg_err 'Не удалось восстановить планировщик сертификатов.'; return 1; }
         msg_err 'Модуль AWG в ядре мог быть пересобран; полный backup остаётся в /var/backups/x-ui.'
         return 1
     fi
     printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
     printf '%s\n' "$script_commit" > "$PREINSTALL_STATE_DIR/pro-commit" || return 1
-    setup_cron || return 1
     setup_fail2ban || true
     msg_ok "Обновление завершено. Панель: $UPDATE_TARGET. Backup: /var/backups/x-ui."
 )
@@ -2100,7 +2104,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.3'
+REVISION = '2026.10.07-286.4'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -2452,6 +2456,39 @@ def verify_state(root, state, before_repair=False):
     print('Protected clients, memberships, accounts, settings and files: preserved.')
 
 
+def restore_sidecars(root, source, destination):
+    """Fill absent files only for Pro-supported, configured sidecar protocols."""
+    import shutil
+    with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db')) as db:
+        protocols = {r[0] for r in db.execute('SELECT DISTINCT protocol FROM inbounds')}
+    prefixes = protocols & {'qwdtt', 'csqtt', 'tproxy', 'olcrtc', 'openflux'}
+    if 'tproxy' in prefixes:
+        prefixes.add('mtproxy')
+    def missing(src, dst):
+        if src.is_symlink() or dst.is_symlink():
+            return
+        if src.is_dir():
+            if dst.exists() and not dst.is_dir():
+                return
+            dst.mkdir(parents=True, exist_ok=True)
+            for child in src.iterdir():
+                missing(child, dst / child.name)
+        elif src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    bins = source / 'bin'
+    if bins.is_symlink() or not bins.is_dir() or (destination / 'bin').is_symlink():
+        return
+    for file in bins.iterdir():
+        if file.is_file() and any(re.fullmatch(re.escape(core) + r'-linux-(?:amd64|arm64|arm|arm32|armv[567]|386)', file.name) for core in prefixes):
+            missing(file, destination / 'bin' / file.name)
+    tunnel = bins / 'tunnel'
+    if tunnel.is_dir() and not tunnel.is_symlink() and not (destination / 'bin/tunnel').is_symlink():
+        for file in tunnel.iterdir():
+            if any(file.name.startswith(core + '-') or file.name.startswith(core + '.') for core in prefixes):
+                missing(file, destination / 'bin/tunnel' / file.name)
+
+
 def adapt_updater(path):
     """Keep the author's updater; suppress its setup wizard; retain native AWG."""
     text = path.read_text(encoding='utf-8')
@@ -2605,14 +2642,17 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'restore-sidecars', 'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
+    parser.add_argument('--source', type=Path)
     parser.add_argument('--before-repair', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.action == 'adapt-updater':
+    if args.action == 'restore-sidecars':
+        restore_sidecars(root, args.source, root / 'usr/local/x-ui')
+    elif args.action == 'adapt-updater':
         adapt_updater(args.path)
     elif args.action in ('capture', 'capture-update'):
         args.state.write_text(json.dumps(protected_state(root, args.action == 'capture-update'), ensure_ascii=False), encoding='utf-8')
@@ -5303,6 +5343,53 @@ tune_system() {
 # ─────────────────────────────────────────────────────────────────────────────
 # CRON JOBS
 # ─────────────────────────────────────────────────────────────────────────────
+save_renewal_state() {
+    local dir="$1" unit
+    mkdir -p "$dir" || return 1
+    if command -v crontab >/dev/null 2>&1 && crontab -l > "$dir/root-crontab" 2>/dev/null; then
+        touch "$dir/crontab-present" || return 1
+    else
+        : > "$dir/root-crontab" || return 1
+    fi
+    for unit in certbot.timer cron; do
+        systemctl is-enabled "$unit" > "$dir/$unit-enabled" 2>/dev/null || true
+        systemctl is-active "$unit" > "$dir/$unit-active" 2>/dev/null || true
+    done
+}
+
+restore_renewal_state() {
+    local dir="$1" unit enabled active failed=0
+    [[ -d "$dir" ]] || return 0
+    if command -v crontab >/dev/null 2>&1; then
+        if [[ -f "$dir/crontab-present" ]]; then
+            crontab "$dir/root-crontab" || failed=1
+        else
+            if crontab -l >/dev/null 2>&1; then
+                crontab -r || failed=1
+            fi
+        fi
+    fi
+    for unit in certbot.timer cron; do
+        enabled=$(cat "$dir/$unit-enabled" 2>/dev/null)
+        active=$(cat "$dir/$unit-active" 2>/dev/null)
+        case "$enabled" in
+            masked*) systemctl mask --now "$unit" >/dev/null 2>&1 || failed=1 ;;
+            *)
+                systemctl unmask "$unit" >/dev/null 2>&1 || failed=1
+                case "$enabled" in
+                    enabled*) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                    disabled) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                esac
+                if [[ "$active" == active ]]; then
+                    systemctl start "$unit" >/dev/null 2>&1 || failed=1
+                elif [[ "$active" != unknown && "$enabled" != not-found && -n "$enabled" ]]; then
+                    systemctl stop "$unit" >/dev/null 2>&1 || failed=1
+                fi ;;
+        esac
+    done
+    return "$failed"
+}
+
 setup_cron() {
     # Minimal Debian/Ubuntu images may not include the `crontab` command.
     # Install it here as a safeguard as well as in install_packages(), so this
@@ -5312,14 +5399,22 @@ setup_cron() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y -q cron || return 1
     fi
 
-    systemctl enable --now cron 2>/dev/null || true
-    # The distro timer has no standalone nginx hooks. Use only our root cron.
-    systemctl mask --now certbot.timer || return 1
-    remove_lucx_cron_jobs || return 1
-    # Xray owns scheduled geodata downloads and reloads through cfg.geodata.
-    # Retire the old RUNET-only updater when upgrading an existing installation.
+    local saved next
+    saved=$(mktemp -d) || return 1
+    save_renewal_state "$saved" || { rm -rf -- "$saved"; return 1; }
+    next="$saved/next-crontab"
+    local cert='0 1 * * * certbot renew --non-interactive --pre-hook "systemctl stop nginx" --deploy-hook "x-ui restart" --post-hook "systemctl start nginx" >/dev/null 2>&1'
+    # Write the complete table once; preserve unrelated jobs and comments.
+    awk -v cert="$cert" '$0 != cert && (/^[[:space:]]*#/ || $0 !~ /\/usr\/local\/x-ui\/update-geodata\.sh([[:space:];]|$)/)' "$saved/root-crontab" > "$next" || { rm -rf -- "$saved"; return 1; }
+    printf '%s\n' "$cert" >> "$next" || { rm -rf -- "$saved"; return 1; }
+    if ! { systemctl enable --now cron && systemctl mask --now certbot.timer && crontab "$next"; }; then
+        restore_renewal_state "$saved" || msg_err 'Не удалось полностью восстановить планировщик сертификатов.'
+        rm -rf -- "$saved"
+        return 1
+    fi
+    # Xray owns scheduled geodata updates; remove the legacy script only on success.
     rm -f /usr/local/x-ui/update-geodata.sh
-    (crontab -l 2>/dev/null; echo '0 1 * * * certbot renew --non-interactive --pre-hook "systemctl stop nginx" --deploy-hook "x-ui restart" --post-hook "systemctl start nginx" >/dev/null 2>&1') | crontab -
+    rm -rf -- "$saved"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

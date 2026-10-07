@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.3'
+REVISION = '2026.10.07-286.4'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -360,6 +360,39 @@ def verify_state(root, state, before_repair=False):
     print('Protected clients, memberships, accounts, settings and files: preserved.')
 
 
+def restore_sidecars(root, source, destination):
+    """Fill absent files only for Pro-supported, configured sidecar protocols."""
+    import shutil
+    with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db')) as db:
+        protocols = {r[0] for r in db.execute('SELECT DISTINCT protocol FROM inbounds')}
+    prefixes = protocols & {'qwdtt', 'csqtt', 'tproxy', 'olcrtc', 'openflux'}
+    if 'tproxy' in prefixes:
+        prefixes.add('mtproxy')
+    def missing(src, dst):
+        if src.is_symlink() or dst.is_symlink():
+            return
+        if src.is_dir():
+            if dst.exists() and not dst.is_dir():
+                return
+            dst.mkdir(parents=True, exist_ok=True)
+            for child in src.iterdir():
+                missing(child, dst / child.name)
+        elif src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    bins = source / 'bin'
+    if bins.is_symlink() or not bins.is_dir() or (destination / 'bin').is_symlink():
+        return
+    for file in bins.iterdir():
+        if file.is_file() and any(re.fullmatch(re.escape(core) + r'-linux-(?:amd64|arm64|arm|arm32|armv[567]|386)', file.name) for core in prefixes):
+            missing(file, destination / 'bin' / file.name)
+    tunnel = bins / 'tunnel'
+    if tunnel.is_dir() and not tunnel.is_symlink() and not (destination / 'bin/tunnel').is_symlink():
+        for file in tunnel.iterdir():
+            if any(file.name.startswith(core + '-') or file.name.startswith(core + '.') for core in prefixes):
+                missing(file, destination / 'bin/tunnel' / file.name)
+
+
 def adapt_updater(path):
     """Keep the author's updater; suppress its setup wizard; retain native AWG."""
     text = path.read_text(encoding='utf-8')
@@ -513,14 +546,17 @@ def inspect(root):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('report', 'clients', 'apply', 'firewall',
-                                         'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
+                                         'restore-sidecars', 'capture', 'capture-update', 'preserve-flow', 'verify', 'probe', 'prepare-update', 'adapt-updater'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--state', type=Path)
     parser.add_argument('--path', type=Path)
+    parser.add_argument('--source', type=Path)
     parser.add_argument('--before-repair', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.action == 'adapt-updater':
+    if args.action == 'restore-sidecars':
+        restore_sidecars(root, args.source, root / 'usr/local/x-ui')
+    elif args.action == 'adapt-updater':
         adapt_updater(args.path)
     elif args.action in ('capture', 'capture-update'):
         args.state.write_text(json.dumps(protected_state(root, args.action == 'capture-update'), ensure_ascii=False), encoding='utf-8')
