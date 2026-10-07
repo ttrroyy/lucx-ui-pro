@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.07-286.4"
+PRO_COMPAT_REVISION="2026.10.07-286.5"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -396,6 +396,53 @@ restore_firewall_state() {
 
 # Snapshot shared resources before the first mutation. The marker is written last.
 # Uninstall refuses to guess ownership if this snapshot is missing.
+save_renewal_state() {
+    local dir="$1" unit
+    mkdir -p "$dir" || return 1
+    if command -v crontab >/dev/null 2>&1 && crontab -l > "$dir/root-crontab" 2>/dev/null; then
+        touch "$dir/crontab-present" || return 1
+    else
+        : > "$dir/root-crontab" || return 1
+    fi
+    for unit in certbot.timer cron; do
+        systemctl is-enabled "$unit" > "$dir/$unit-enabled" 2>/dev/null || true
+        systemctl is-active "$unit" > "$dir/$unit-active" 2>/dev/null || true
+    done
+}
+
+restore_renewal_state() {
+    local dir="$1" unit enabled active failed=0
+    [[ -d "$dir" ]] || return 0
+    if command -v crontab >/dev/null 2>&1; then
+        if [[ -f "$dir/crontab-present" ]]; then
+            crontab "$dir/root-crontab" || failed=1
+        else
+            if crontab -l >/dev/null 2>&1; then
+                crontab -r || failed=1
+            fi
+        fi
+    fi
+    for unit in certbot.timer cron; do
+        enabled=$(cat "$dir/$unit-enabled" 2>/dev/null)
+        active=$(cat "$dir/$unit-active" 2>/dev/null)
+        case "$enabled" in
+            masked*) systemctl mask --now "$unit" >/dev/null 2>&1 || failed=1 ;;
+            *)
+                systemctl unmask "$unit" >/dev/null 2>&1 || failed=1
+                case "$enabled" in
+                    enabled*) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                    disabled) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
+                esac
+                if [[ "$active" == active ]]; then
+                    systemctl start "$unit" >/dev/null 2>&1 || failed=1
+                elif [[ "$active" != unknown && "$enabled" != not-found && -n "$enabled" ]]; then
+                    systemctl stop "$unit" >/dev/null 2>&1 || failed=1
+                fi ;;
+        esac
+    done
+    return "$failed"
+}
+
 save_preinstall_state() {
     local dir="${PREINSTALL_STATE_DIR}" path
     umask 077
@@ -2104,7 +2151,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.4'
+REVISION = '2026.10.07-286.5'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -5343,53 +5390,6 @@ tune_system() {
 # ─────────────────────────────────────────────────────────────────────────────
 # CRON JOBS
 # ─────────────────────────────────────────────────────────────────────────────
-save_renewal_state() {
-    local dir="$1" unit
-    mkdir -p "$dir" || return 1
-    if command -v crontab >/dev/null 2>&1 && crontab -l > "$dir/root-crontab" 2>/dev/null; then
-        touch "$dir/crontab-present" || return 1
-    else
-        : > "$dir/root-crontab" || return 1
-    fi
-    for unit in certbot.timer cron; do
-        systemctl is-enabled "$unit" > "$dir/$unit-enabled" 2>/dev/null || true
-        systemctl is-active "$unit" > "$dir/$unit-active" 2>/dev/null || true
-    done
-}
-
-restore_renewal_state() {
-    local dir="$1" unit enabled active failed=0
-    [[ -d "$dir" ]] || return 0
-    if command -v crontab >/dev/null 2>&1; then
-        if [[ -f "$dir/crontab-present" ]]; then
-            crontab "$dir/root-crontab" || failed=1
-        else
-            if crontab -l >/dev/null 2>&1; then
-                crontab -r || failed=1
-            fi
-        fi
-    fi
-    for unit in certbot.timer cron; do
-        enabled=$(cat "$dir/$unit-enabled" 2>/dev/null)
-        active=$(cat "$dir/$unit-active" 2>/dev/null)
-        case "$enabled" in
-            masked*) systemctl mask --now "$unit" >/dev/null 2>&1 || failed=1 ;;
-            *)
-                systemctl unmask "$unit" >/dev/null 2>&1 || failed=1
-                case "$enabled" in
-                    enabled*) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
-                    disabled) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
-                esac
-                if [[ "$active" == active ]]; then
-                    systemctl start "$unit" >/dev/null 2>&1 || failed=1
-                elif [[ "$active" != unknown && "$enabled" != not-found && -n "$enabled" ]]; then
-                    systemctl stop "$unit" >/dev/null 2>&1 || failed=1
-                fi ;;
-        esac
-    done
-    return "$failed"
-}
-
 setup_cron() {
     # Minimal Debian/Ubuntu images may not include the `crontab` command.
     # Install it here as a safeguard as well as in install_packages(), so this

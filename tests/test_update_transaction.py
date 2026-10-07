@@ -24,9 +24,10 @@ class UpdateTransaction(unittest.TestCase):
     def test_renewal_transaction_and_shared_restore_helpers(self):
         text=(repo/'lucx-ui-latest.sh').read_text(encoding='utf-8')
         backup=(repo/'assets/backup/lucx-ui-backup.sh').read_text(encoding='utf-8')
-        helpers=text[text.index('save_renewal_state() {'):text.index('setup_cron() {')]
+        helpers=text[text.index('save_renewal_state() {'):text.index('save_preinstall_state() {')]
         self.assertIn(helpers,backup)
-        block=text[text.index('save_renewal_state() {'):text.index('# FIREWALL',text.index('setup_cron() {'))]
+        self.assertLess(text.index('restore_renewal_state() {'),text.index('if is_full_install_request && existing_lucx_install_detected; then'))
+        block=helpers+text[text.index('setup_cron() {'):text.index('# FIREWALL',text.index('setup_cron() {'))]
         # Never touch a real system in this test.
         block=block.replace('rm -f /usr/local/x-ui/update-geodata.sh', ':')
         bash=shutil.which('bash')
