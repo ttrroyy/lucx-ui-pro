@@ -26,6 +26,37 @@ class NativeAWG(unittest.TestCase):
         self.assertEqual(awg.strip_bbr(text), expected)
         self.assertEqual(awg.strip_bbr(expected), expected)
 
+    def test_awg_cannot_override_panel_with_comments_or_other_values(self):
+        text = '# retained comment\nnet.core.default_qdisc = fq # comment\nnet.ipv4.tcp_congestion_control = bbr # comment\nnet.core.default_qdisc = cake\nnet.ipv4.tcp_congestion_control = cubic\nnet.core.rmem_max = 33554432\n'
+        self.assertEqual(awg.strip_bbr(text), '# retained comment\nnet.core.rmem_max = 33554432\n')
+
+    def test_panel_web_disable_and_old_bbr_baseline_survive(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root/'etc/sysctl.d/99-bbr-x-ui.conf'
+            config.parent.mkdir(parents=True)
+            config.write_text('#fq:bbr\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n')
+            awg.sync_panel_state(root)
+            self.assertTrue(config.read_text().startswith('#fq_codel:cubic\n'))
+            config.unlink()  # The native web endpoint removes its drop-in.
+            awg.sync_panel_state(root)
+            self.assertIn('net.ipv4.tcp_congestion_control = cubic', config.read_text())
+            self.assertIn('net.core.default_qdisc = fq_codel', config.read_text())
+            before = config.read_bytes()
+            awg.sync_panel_state(root)
+            self.assertEqual(config.read_bytes(), before)
+
+    def test_old_cli_disabled_marker_migrates_without_enabling_bbr(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'etc/sysctl.d').mkdir(parents=True)
+            marker = root/'etc/x-ui/.lucx-bbr-restore'
+            marker.parent.mkdir(parents=True)
+            marker.write_text('fq_codel:cubic\n')
+            awg.sync_panel_state(root)
+            self.assertIn('net.ipv4.tcp_congestion_control = cubic',
+                          (root/'etc/sysctl.d/99-bbr-x-ui.conf').read_text())
+
     def test_old_wrapper_restored_before_helper_retired(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'installer.sh'

@@ -435,6 +435,7 @@ install_awg_bbr_support() {
 #!/usr/bin/env python3
 """Keep AWG's performance file BBR-neutral; leave module installation upstream."""
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -442,7 +443,60 @@ import urllib.request
 
 
 def strip_bbr(text):
-    return re.sub(r'(?m)^[ \t]*net\.(?:core\.default_qdisc[ \t]*=[ \t]*fq|ipv4\.tcp_congestion_control[ \t]*=[ \t]*bbr)[ \t]*\r?\n?', '', text)
+    return re.sub(r'(?m)^[ \t]*net\.(?:core\.default_qdisc|ipv4\.tcp_congestion_control)[ \t]*=[^\n]*\n?', '', text)
+
+
+def sync_panel_state(root=Path('/'), apply=False):
+    """Persist the panel's choice, including its drop-in deletion on disable."""
+    config = root/'etc/sysctl.d/99-bbr-x-ui.conf'
+    state = root/'etc/x-ui/.lucx-bbr-state.json'
+    if config.exists():
+        text = config.read_text()
+        qdisc = re.search(r'(?m)^\s*net\.core\.default_qdisc\s*=\s*(\w+)\s*$', text)
+        cc = re.search(r'(?m)^\s*net\.ipv4\.tcp_congestion_control\s*=\s*(\w+)\s*$', text)
+        previous = re.match(r'#(\w+):(\w+)\s*\n', text)
+        if not (qdisc and cc and previous):
+            raise RuntimeError('Unknown panel BBR config; refusing to replace it')
+        restore = list(previous.groups())
+        if restore[1] == 'bbr':
+            restore = ['fq_codel', 'cubic']
+            text = '#' + ':'.join(restore) + '\n' + text.split('\n', 1)[1]
+            config.write_text(text)
+        data = {'selected': [qdisc.group(1), cc.group(1)], 'restore': restore}
+    elif state.exists() or (root/'etc/x-ui/.lucx-bbr-restore').exists():
+        # The web panel deletes the enabled drop-in after applying its saved
+        # pre-BBR values. Keep that disabled choice in the same panel file.
+        if state.exists():
+            selected = json.loads(state.read_text())['restore']
+        else:
+            selected = (root/'etc/x-ui/.lucx-bbr-restore').read_text().strip().split(':')
+        if len(selected) != 2 or any(not re.fullmatch(r'\w+', item) for item in selected):
+            raise RuntimeError('Invalid saved BBR state')
+        if selected[1] == 'bbr':
+            selected = ['fq_codel', 'cubic']
+        data = {'selected': selected, 'restore': selected}
+        config.write_text('#' + ':'.join(selected) + '\nnet.core.default_qdisc = ' + selected[0] +
+                          '\nnet.ipv4.tcp_congestion_control = ' + selected[1] + '\n')
+    else:
+        return
+    state.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(data, sort_keys=True) + '\n'
+    if not state.exists() or state.read_text() != content:
+        state.write_text(content)
+    if apply:
+        current = subprocess.check_output(['sysctl', '-n', 'net.core.default_qdisc',
+                                           'net.ipv4.tcp_congestion_control'], text=True).splitlines()
+        if current == data['selected']:
+            return
+        modules = {'fq': 'sch_fq', 'fq_codel': 'sch_fq_codel', 'cake': 'sch_cake',
+                   'bbr': 'tcp_bbr', 'cubic': 'tcp_cubic'}
+        for value in data['selected']:
+            if value in modules:
+                subprocess.run(['modprobe', modules[value]], check=False, capture_output=True)
+        subprocess.run(['sysctl', '-p', str(config)], check=True, capture_output=True)
+        qdisc_helper = root/'usr/local/sbin/lucx-apply-qdisc'
+        if qdisc_helper.is_file():
+            subprocess.run([str(qdisc_helper)], check=True, capture_output=True)
 
 
 def prepare_installer(path, version=None):
@@ -509,9 +563,13 @@ def cleanup_legacy_modules():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=('prepare', 'sanitize', 'clean-cli', 'cleanup-legacy'))
+    parser.add_argument('command', choices=('prepare', 'sanitize', 'clean-cli', 'cleanup-legacy', 'panel-state'))
+    parser.add_argument('--apply-state', action='store_true')
     parser.add_argument('path', type=Path, nargs='?', default=Path('/'))
     args = parser.parse_args()
+    if args.command == 'panel-state':
+        sync_panel_state(apply=args.apply_state)
+        return
     if args.command == 'cleanup-legacy':
         if subprocess.run(['sh', '-c', 'command -v dkms'], capture_output=True).returncode == 0:
             cleanup_legacy_modules()
@@ -552,14 +610,19 @@ install_awg_sysctl_guard() {
 set -e
 python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py prepare /usr/local/x-ui/bin/install-awg-module.sh
 python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py sanitize /etc/sysctl.d/99-awg-performance.conf
+python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py panel-state --apply-state
 AWG_BBR_GUARD
     chmod 0755 /usr/local/sbin/lucx-awg-sysctl-guard
     cat > /etc/systemd/system/lucx-awg-sysctl-guard.service <<'AWG_BBR_SERVICE'
 [Unit]
-Description=Keep AWG performance settings BBR-neutral
+Description=Keep AWG neutral and preserve panel BBR choice
+After=systemd-modules-load.service systemd-sysctl.service
+Before=x-ui.service lucx-apply-qdisc.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/lucx-awg-sysctl-guard
+[Install]
+WantedBy=multi-user.target
 AWG_BBR_SERVICE
     cat > /etc/systemd/system/lucx-awg-sysctl-guard.path <<'AWG_BBR_PATH'
 [Unit]
@@ -567,12 +630,24 @@ Description=Watch AWG performance settings for BBR assignments
 [Path]
 PathChanged=/usr/local/x-ui/bin/install-awg-module.sh
 PathChanged=/etc/sysctl.d/99-awg-performance.conf
+PathChanged=/etc/sysctl.d/99-bbr-x-ui.conf
 Unit=lucx-awg-sysctl-guard.service
 [Install]
 WantedBy=multi-user.target
 AWG_BBR_PATH
+    cat > /etc/systemd/system/lucx-awg-sysctl-guard.timer <<'AWG_BBR_TIMER'
+[Unit]
+Description=Restore panel BBR choice after sidecar runtime tuning
+[Timer]
+OnBootSec=20
+OnUnitInactiveSec=20
+AccuracySec=1
+Unit=lucx-awg-sysctl-guard.service
+[Install]
+WantedBy=timers.target
+AWG_BBR_TIMER
     systemctl daemon-reload || return 1
-    systemctl enable --now lucx-awg-sysctl-guard.path || return 1
+    systemctl enable --now lucx-awg-sysctl-guard.service lucx-awg-sysctl-guard.path lucx-awg-sysctl-guard.timer || return 1
     /usr/local/sbin/lucx-awg-sysctl-guard || return 1
 }
 
@@ -583,8 +658,7 @@ patch_awg_installer() {
 import re, sys
 path=sys.argv[1]
 text=open(path,encoding="utf-8",errors="surrogateescape").read()
-text=re.sub(r'(?m)^\s*net\.core\.default_qdisc\s*=\s*fq\s*$\n?', '', text)
-text=re.sub(r'(?m)^\s*net\.ipv4\.tcp_congestion_control\s*=\s*bbr\s*$\n?', '', text)
+text=re.sub(r'(?m)^[ \t]*net\.(?:core\.default_qdisc|ipv4\.tcp_congestion_control)[ \t]*=[^\n]*\n?', '', text)
 open(path,'w',encoding='utf-8',errors='surrogateescape').write(text)
 PY_AWG_RESTORE
     chmod +x "$script" 2>/dev/null || true
@@ -709,16 +783,36 @@ repl2="""        sysctl -w net.ipv4.tcp_congestion_control=\"${old_settings#*:}\
         rm /etc/sysctl.d/99-bbr-x-ui.conf"""
 if needle2 in text and "printf '%s\\n' \"$old_settings\" > /etc/x-ui/.lucx-bbr-restore" not in text:
     text=text.replace(needle2,repl2,1)
+
+# A disabled choice must survive reboot too. Older Pro/AWG installs may have
+# captured BBR itself as the pre-BBR value; restoring that cannot disable it.
+start=text.find('disable_bbr() {')
+end=text.find('\nenable_bbr()',start)
+if start >= 0 and end > start:
+    block=text[start:end]
+    line="        old_settings=$(head -1 /etc/sysctl.d/99-bbr-x-ui.conf | tr -d '#')"
+    fallback="""
+        # LUCX PRO BBR disabled persistence
+        if [[ "${old_settings#*:}" == "bbr" ]]; then
+            modprobe tcp_cubic >/dev/null 2>&1 || true
+            modprobe sch_fq_codel >/dev/null 2>&1 || true
+            old_settings="fq_codel:cubic"
+        fi"""
+    if line in block and 'LUCX PRO BBR disabled persistence' not in block:
+        block=block.replace(line,line+fallback,1)
+    removal='        rm /etc/sysctl.d/99-bbr-x-ui.conf'
+    persist=r"""        # Keep one panel-owned file for both enabled and disabled choices.
+        printf '#%s\nnet.core.default_qdisc = %s\nnet.ipv4.tcp_congestion_control = %s\n' \
+            "$old_settings" "${old_settings%:*}" "${old_settings#*:}" > /etc/sysctl.d/99-bbr-x-ui.conf"""
+    if removal in block:
+        block=block.replace(removal,persist,1)
+    text=text[:start]+block+text[end:]
+
 open(path,'w',encoding='utf-8',errors='surrogateescape').write(text)
 PY_BBR_RESTORE_PATCH
         chmod +x "$script" 2>/dev/null || true
     done
-    if [[ -f /etc/sysctl.d/99-awg-performance.conf ]] && grep -Eq '^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$|^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$' /etc/sysctl.d/99-awg-performance.conf; then
-        sed -i -E \
-            -e '/^[[:space:]]*net\.core\.default_qdisc[[:space:]]*=[[:space:]]*fq[[:space:]]*$/d' \
-            -e '/^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr[[:space:]]*$/d' \
-            /etc/sysctl.d/99-awg-performance.conf || true
-    fi
+    python3 /usr/local/lib/lucx-ui-pro/awg-bbr.py sanitize /etc/sysctl.d/99-awg-performance.conf || return 1
 }
 
 # Validate the complete gzip/tar stream and its member names before extraction.
@@ -777,7 +871,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.5'
+REVISION = '2026.10.07-286.6'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -1528,7 +1622,7 @@ PY_META_AWG
 
     # ── stop running services ─────────────────────────────────────────────
     blue "==> Stopping services..."
-    for svc in lucx-awg-readiness nginx x-ui lucx-clash-sub mtr-backend AdGuardHome lucx-apply-qdisc lucx-qdisc-sync lucx-qdisc-sync.path lucx-awg-sysctl-guard lucx-awg-sysctl-guard.path; do
+    for svc in lucx-awg-sysctl-guard.timer lucx-awg-readiness nginx x-ui lucx-clash-sub mtr-backend AdGuardHome lucx-apply-qdisc lucx-qdisc-sync lucx-qdisc-sync.path lucx-awg-sysctl-guard lucx-awg-sysctl-guard.path; do
         systemctl stop "${svc}" 2>/dev/null || true
     done
 
@@ -1776,6 +1870,7 @@ PY_TG_RESTORE
     fi
     if [[ -f /etc/systemd/system/lucx-awg-sysctl-guard.path ]]; then
         restore_unit_state lucx-awg-sysctl-guard.path
+        systemctl enable --now lucx-awg-sysctl-guard.service lucx-awg-sysctl-guard.timer || return 1
     fi
 
     # Restore rkn-guard runtime units and LucX automatic-update timers when present.
