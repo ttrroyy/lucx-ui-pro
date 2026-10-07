@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.06-286.1"
+PRO_COMPAT_REVISION="2026.10.07-286.2"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -290,6 +290,7 @@ PY_LUCX_LOG_POLICY
 DNS_CHOICE=""
 DEPLOY_QWDTT=""
 DEPLOY_CSQTT=""
+DEPLOY_OPENFLUX=""
 DEPLOY_AGH=""
 DEPLOY_HY2=""
 DEPLOY_TPROXY=""
@@ -1334,9 +1335,9 @@ choose_hy2_port() {
 }
 
 choose_extra_inbounds() {
-    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c want_tproxy ok arch
+    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c want_tproxy want_openflux ok arch
     local -a toks
-    DEPLOY_HY2="2"; DEPLOY_QWDTT=""; DEPLOY_CSQTT=""; DEPLOY_TPROXY=""
+    DEPLOY_HY2="2"; DEPLOY_QWDTT=""; DEPLOY_CSQTT=""; DEPLOY_TPROXY=""; DEPLOY_OPENFLUX=""
     hy2_port=""; webproxy_domain=""; TPROXY_SECRET=""
     arch=$(uname -m)
     tty="/dev/tty"; [[ -t 0 && -r /dev/tty ]] || tty=""
@@ -1349,21 +1350,22 @@ choose_extra_inbounds() {
         echo '3 - qWDTT'
         echo '4 - CSQTT'
         echo '5 - Telegram WEB-proxy'
+        echo '6 - OpenFlux'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Выберите инбаунды:'
         if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
         mapped=$(echo "$ans" | tr -d '[:space:]')
         [[ -n "$mapped" ]] || continue
-        if [[ ! "$mapped" =~ ^[1-5](,[1-5])*$ ]] ||
+        if [[ ! "$mapped" =~ ^[1-6](,[1-6])*$ ]] ||
            [[ "$mapped" != "1" && ",$mapped," == *",1,"* ]]; then
-            msg_err "Введите номера 2–5 через запятую либо 1 без других номеров."
+            msg_err "Введите номера 2–6 через запятую либо 1 без других номеров."
             continue
         fi
         if [[ ",$mapped," == *",5,"* && "$arch" != "x86_64" ]]; then
             msg_err "Telegram WEB-proxy доступен только на x86_64 (MTProxy)."
             continue
         fi
-        has1=0; has_valid=0; want_hy2=0; want_q=0; want_c=0; want_tproxy=0
+        has1=0; has_valid=0; want_hy2=0; want_q=0; want_c=0; want_tproxy=0; want_openflux=0
         IFS=',' read -ra toks <<< "$mapped"
         for tok in "${toks[@]}"; do
             case "$tok" in
@@ -1372,6 +1374,7 @@ choose_extra_inbounds() {
                 3) has_valid=1; want_q=1 ;;
                 4) has_valid=1; want_c=1 ;;
                 5) has_valid=1; want_tproxy=1 ;;
+                6) has_valid=1; want_openflux=1 ;;
             esac
         done
         # The confirmation menu is redrawn in full after Enter/invalid input.
@@ -1387,6 +1390,7 @@ choose_extra_inbounds() {
                 [[ "$want_q" -eq 1 ]] && names+="qWDTT, "
                 [[ "$want_c" -eq 1 ]] && names+="CSQTT, "
                 [[ "$want_tproxy" -eq 1 ]] && names+="Telegram WEB-proxy, "
+                [[ "$want_openflux" -eq 1 ]] && names+="OpenFlux, "
                 names="${names%, }"
                 msg_inf "Вы выбрали ${names}, все верно?"
             fi
@@ -1407,6 +1411,7 @@ choose_extra_inbounds() {
         if [[ "$want_q" -eq 1 ]]; then DEPLOY_QWDTT="1"; else DEPLOY_QWDTT=""; fi
         if [[ "$want_c" -eq 1 ]]; then DEPLOY_CSQTT="1"; else DEPLOY_CSQTT=""; fi
         if [[ "$want_tproxy" -eq 1 ]]; then DEPLOY_TPROXY="1"; else DEPLOY_TPROXY=""; fi
+        if [[ "$want_openflux" -eq 1 ]]; then DEPLOY_OPENFLUX="1"; else DEPLOY_OPENFLUX=""; fi
         break
     done
     if [[ "$DEPLOY_HY2" == "1" ]]; then choose_hy2_port; else hy2_port=""; fi
@@ -2095,7 +2100,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.06-286.1'
+REVISION = '2026.10.07-286.2'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -2651,7 +2656,7 @@ install_shareonly_client_sync() {
 }
 
 insert_extra_inbound() {
-    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" || "${DEPLOY_TPROXY}" == "1" ]] || return 0
+    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" || "${DEPLOY_TPROXY}" == "1" || "${DEPLOY_OPENFLUX}" == "1" ]] || return 0
     [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add extra inbound."; return 1; }
     [[ -z "${IP4:-}" ]] && get_server_ip
     local proto remark port listen_addr sub_host pass web_pass
@@ -2663,7 +2668,10 @@ insert_extra_inbound() {
 import json, sqlite3, sys
 db, proto, remark, port, listen_addr, sub_host, password, web_pass = sys.argv[1:9]
 port = int(port)
-if proto == "qwdtt":
+if proto == "openflux":
+    settings = {"clients": [], "secret": web_pass, "shareHost": sub_host,
+                "yandexUrl": "", "mailruUrl": "", "cupsUrl": ""}
+elif proto == "qwdtt":
     settings = {
         "clients": [],
         "remark": remark,
@@ -2699,7 +2707,7 @@ else:
     }
 stream = {"security": "none"}
 sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
-tag = "inbound-qwdtt" if proto == "qwdtt" else "inbound-csqtt"
+tag = "inbound-" + proto
 con = sqlite3.connect(db, timeout=30)
 cur = con.cursor()
 row = cur.execute("SELECT id FROM inbounds WHERE protocol=? OR tag=? LIMIT 1", (proto, tag)).fetchone()
@@ -2707,6 +2715,12 @@ if row:
     con.close()
     print("exists")
     raise SystemExit(0)
+if proto == "openflux":
+    if cur.execute("SELECT 1 FROM inbounds WHERE port=? LIMIT 1", (port,)).fetchone():
+        raise RuntimeError("OpenFlux default port 18445 is already used by another inbound")
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("0.0.0.0", port))
 cur.execute(
     "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     (1, 0, 0, 0, remark, 1, 0, "", port, proto,
@@ -2726,6 +2740,9 @@ PY
     fi
     if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
         _insert_one_extra csqtt CSQTT 46000 '0.0.0.0:46000' "${IP4}" || return 1
+    fi
+    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
+        _insert_one_extra openflux OpenFlux 18445 "" "${IP4}" || return 1
     fi
     insert_tproxy_inbound || return 1
     install_shareonly_client_sync
@@ -4074,6 +4091,15 @@ install_panel() {
             echo "Failed to fetch LucX-UI version." && exit 1
         fi
     fi
+    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
+        python3 - "$tag_version" <<'PY_OPENFLUX_VERSION'
+import re,sys
+m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-lucx\.(\d+)',sys.argv[1])
+if not m or tuple(map(int,m.groups())) < (3,9,0,281):
+    raise SystemExit('OpenFlux requires panel v3.9.0-lucx.281 or newer.')
+PY_OPENFLUX_VERSION
+        [[ $? -eq 0 ]] || return 1
+    fi
     echo "Installing LucX-UI ${tag_version} ..."
     release_url="$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"
     printf '%s\n' "/usr/local/x-ui-linux-$(_arch).tar.gz" > "$PREINSTALL_STATE_DIR/release-archive"
@@ -5330,6 +5356,9 @@ setup_firewall() {
     fi
     if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
         ufw allow 46000/udp
+    fi
+    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
+        ufw allow 18445/tcp || return 1
     fi
     ufw --force enable
 }
