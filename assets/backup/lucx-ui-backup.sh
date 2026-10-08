@@ -1400,7 +1400,65 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.2'
+REVISION = '2026.10.08-287.3'
+# Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
+CLASH_RENDERER_SOURCE = r'''
+#!/usr/bin/env python3
+"""Local per-client YAML renderer, with identical GET/HEAD response headers."""
+import argparse
+import re
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+TEMPLATE = Path('/var/www/subpage/clash.yaml.tpl')
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.render()
+
+    def do_HEAD(self):
+        self.render()
+
+    def render(self):
+        parsed = urlsplit(self.path)
+        if parsed.path == '/health':
+            return self.reply(200, b'ok', 'text/plain')
+        if parsed.path != '/api/clash':
+            return self.reply(404, b'not found', 'text/plain')
+        sub_id = parse_qs(parsed.query).get('sub_id', [''])[0]
+        if not re.fullmatch(r'[A-Za-z0-9._~-]{1,256}', sub_id):
+            return self.reply(400, b'invalid subscription id', 'text/plain')
+        try:
+            body = TEMPLATE.read_text(encoding='utf-8').replace('${SUB_ID}', sub_id).encode('utf-8')
+        except OSError:
+            return self.reply(503, b'template unavailable', 'text/plain')
+        self.reply(200, body, 'text/yaml; charset=utf-8')
+
+    def reply(self, status, body, content_type):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        if status == 200 and content_type.startswith('text/yaml'):
+            self.send_header('Content-Disposition', 'attachment; filename="clash.yaml"')
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        # nginx already logs requests; do not duplicate secret subscription IDs
+        # in the renderer's system journal.
+        pass
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, required=True)
+    args = parser.parse_args()
+    ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
+'''
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -1843,6 +1901,7 @@ def repair_nginx(root, settings):
     if template.is_file():
         text = template.read_text(encoding='utf-8')
         original_template = text
+        text = repair_clash_template(text)
         text, count = re.subn(
             r'(?m)^(    url: https://[^/\s]+)/[^/\s]+/\$\{SUB_ID\}\?provider=1$',
             r'\1/__lucx_provider/${SUB_ID}', text)
@@ -1901,6 +1960,58 @@ def repair_nginx(root, settings):
             path.write_text(repaired, encoding='utf-8')
 
 
+def repair_clash_renderer(root):
+    # This dedicated service/file is owned by Pro. Keep its port, unit and
+    # template unchanged; only replace the implementation that lacked HEAD.
+    renderer = root / 'usr/local/lib/lucx-ui-pro/clash-sub-server.py'
+    unit = root / 'etc/systemd/system/lucx-clash-sub.service'
+    if not unit.is_file() or not (root / 'var/www/subpage/clash.yaml.tpl').is_file():
+        return
+    if '/usr/local/lib/lucx-ui-pro/clash-sub-server.py' not in unit.read_text(encoding='utf-8'):
+        return
+    source = CLASH_RENDERER_SOURCE.lstrip('\n')
+    if not renderer.is_file() or renderer.read_text(encoding='utf-8') != source:
+        renderer.parent.mkdir(parents=True, exist_ok=True)
+        renderer.write_text(source, encoding='utf-8', newline='\n')
+        renderer.chmod(0o755)
+
+
+def repair_clash_template(text):
+    # Only our named HTTP provider needs these overrides. Never change native
+    # panel inbounds/hosts or fingerprints for TLS/XHTTP or other providers.
+    match = re.search(r'(?m)^proxy-providers:\n  sub:\n((?:    [^\n]*\n|[ \t]*\n)*)', text)
+    if not match or not re.search(r'(?m)^    type: http\s*$', match[1]):
+        return text
+    body = match[1]
+    if not re.search(r'(?m)^    proxy:', body):
+        body = body.replace('    type: http\n', '    type: http\n    proxy: DIRECT\n', 1)
+    if '    path: ./proxy_providers/base64.yml\n' in body:
+        url = re.search(r'(?m)^    url: https://([^/\s]+)/([^/\s]+)/\$\{SUB_ID\}', body)
+        if url:
+            body = body.replace('    path: ./proxy_providers/base64.yml\n',
+                                f'    path: ./proxy_providers/{url[1]}_{url[2]}_${{SUB_ID}}.yaml\n')
+    if '    override:\n' not in body:
+        # An unfamiliar inline override belongs to the user; do not replace it.
+        if re.search(r'(?m)^    override:', body):
+            return text[:match.start(1)] + body + text[match.end(1):]
+        body += '    override:\n'
+    if '      override-expr:\n' not in body:
+        if re.search(r'(?m)^      override-expr:', body):
+            return text[:match.start(1)] + body + text[match.end(1):]
+        body = body.replace('    override:\n', '    override:\n      override-expr:\n', 1)
+    # Mihomo 1.19.32's Firefox preset cannot negotiate new Xray REALITY.
+    # Limit Chrome to REALITY; ordinary TLS/XHTTP retains its native Firefox.
+    expressions = (
+        '(select(.type == "vless" and .["reality-opts"] != null) | .["client-fingerprint"]) = "chrome"',
+        '(select(.type == "vless" and .["reality-opts"] != null) | .["reality-opts"]["support-x25519mlkem768"]) = true',
+    )
+    for expression in reversed(expressions):
+        if expression not in body:
+            body = body.replace('      override-expr:\n',
+                                "      override-expr:\n        - '" + expression + "'\n", 1)
+    return text[:match.start(1)] + body + text[match.end(1):]
+
+
 def remove_forwarding_override(root):
     path = root / 'etc/sysctl.d/99-lucx-ui-forwarding.conf'
     if not path.is_file():
@@ -1930,6 +2041,7 @@ def migrate(root, clients_only=False):
             return
         settings = dict(db.execute('SELECT key,value FROM settings ORDER BY id'))
         repair_nginx(root, settings)
+        repair_clash_renderer(root)
         db.commit()
     remove_forwarding_override(root)
     repair_rkn_timers(root)
@@ -2009,38 +2121,6 @@ def main():
 if __name__ == '__main__':
     main()
 PY_PRO_COMPAT
-}
-
-repair_clash_template() {
-    [[ -f /var/www/subpage/clash.yaml.tpl ]] || return 0
-    python3 <<'PY_CLASH_RESTORE'
-from pathlib import Path
-import re
-
-path = Path('/var/www/subpage/clash.yaml.tpl')
-text = path.read_text(encoding='utf-8')
-original = text
-expression = '''        - '(select(.type == "vless" and .["reality-opts"] != null) | .["client-fingerprint"]) = "chrome"'\n'''
-anchor = '''        - '(select(.type == "vless" and .["reality-opts"] != null) | .["reality-opts"]["support-x25519mlkem768"]) = true'\n'''
-if expression not in text:
-    if text.count(anchor) != 1:
-        raise SystemExit('Unexpected Clash template; no changes made.')
-    text = text.replace(anchor, expression + anchor)
-text = text.replace('global-client-fingerprint: chrome\n', '')
-if '    path: ./proxy_providers/base64.yml\n' in text:
-    match = re.search(r'(?m)^    url: https://([^/\s]+)/([^/\s]+)/\$\{SUB_ID\}(?:\?provider=1)?$', text)
-    if not match:
-        raise SystemExit('Unexpected provider URL; no changes made.')
-    domain, sub_path = match.groups()
-    text = text.replace('    path: ./proxy_providers/base64.yml\n',
-                        f'    path: ./proxy_providers/{domain}_{sub_path}_${{SUB_ID}}.yaml\n')
-provider_header = 'proxy-providers:\n  sub:\n    type: http\n'
-if provider_header + '    proxy: DIRECT\n' not in text:
-    text = text.replace(provider_header, provider_header + '    proxy: DIRECT\n')
-if text != original:
-    path.write_text(text, encoding='utf-8')
-    print('Restored Clash template updated for current Mihomo.')
-PY_CLASH_RESTORE
 }
 
 repair_panel_clash_route() {
@@ -2295,7 +2375,6 @@ PY_META_AWG
     setup_fail2ban || true
     install_awg_sysctl_guard || return 1
     sanitize_awg_sysctl_file
-    repair_clash_template
     repair_panel_clash_route
     run_architecture reconcile || return 1
     run_pro_compat apply || return 1

@@ -3,6 +3,14 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
+renderer = (root / 'assets/clash/clash-sub-server.py').read_text(encoding='utf-8')
+path = root / 'assets/compat/pro-compat.py'
+text = path.read_text(encoding='utf-8')
+marker = "CLASH_RENDERER_SOURCE = r'''\n"
+before, tail = text.split(marker, 1)
+_, after = tail.split("\n'''", 1)
+path.write_text(before + marker + renderer.rstrip() + "\n'''" + after,
+                encoding='utf-8', newline='\n')
 helper = (root / 'assets/compat/pro-compat.py').read_text(encoding='utf-8').rstrip()
 awg = (root / 'assets/compat/awg-bbr.py').read_text(encoding='utf-8').rstrip()
 architecture = (root / 'assets/compat/architecture.py').read_text(encoding='utf-8').rstrip()
@@ -10,6 +18,11 @@ logs = (root / 'assets/compat/log-policy.py').read_text(encoding='utf-8').rstrip
 for relative in ('lucx-ui-latest.sh', 'assets/backup/lucx-ui-backup.sh'):
     path = root / relative
     text = path.read_text(encoding='utf-8')
+    if relative == 'lucx-ui-latest.sh':
+        marker = "<<'PY_CLASH_SERVER'\n"
+        before, tail = text.split(marker, 1)
+        _, after = tail.split('\nPY_CLASH_SERVER\n', 1)
+        text = before + marker + renderer.rstrip() + '\nPY_CLASH_SERVER\n' + after
     marker = "<<'PY_PRO_COMPAT'\n"
     if text.count(marker) != 1:
         raise SystemExit(f'Expected exactly one helper in {relative}')
