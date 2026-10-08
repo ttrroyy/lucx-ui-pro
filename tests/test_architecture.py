@@ -268,7 +268,7 @@ class Architecture(unittest.TestCase):
                 if key not in ('listen','settings','stream_settings'): self.assertEqual(before[2][key], after[2][key])
             stream = json.loads(after[2]['stream_settings'])
             self.assertEqual(stream['xhttpSettings']['mode'],'stream-up')
-            self.assertEqual(stream['sockopt'], {'futureSockopt':42,'trustedXForwardedFor':['X-Forwarded-For']})
+            self.assertNotIn('sockopt', stream)
             self.assertEqual(stream['future'], {'native':True})
             self.assertEqual(stream['xhttpSettings']['future'],'keep')
             with connection(root/'etc/x-ui/x-ui.db') as db:
@@ -411,14 +411,14 @@ class Architecture(unittest.TestCase):
                     stream['xhttpSettings'].update({k:'user-changed' for k in arch.XHTTP_FIELDS})
                     stream['xhttpSettings'].update(mode=mode, xmux={'maxConcurrency':'1','maxConnections':4,'future':7},
                         extra={'noGRPCHeader':True,'futureExtra':9},future='keep')
-                    stream['sockopt'].update({k:'changed' for k in arch.SOCKOPT_FIELDS})
+                    stream['sockopt'] = {k:'changed' for k in arch.SOCKOPT_FIELDS}
                     stream['sockopt']['futureSockopt']=42
                     db.execute('UPDATE inbounds SET stream_settings=? WHERE id=2',(json.dumps(stream),))
                 arch.reconcile(root)
                 stream=json.loads(records(root)[2]['stream_settings'])
                 self.assertEqual(stream['xhttpSettings'],{'host':'main.example','path':'/secret','mode':'stream-up','future':'keep',
                     'xmux':{'future':7},'extra':{'futureExtra':9}})
-                self.assertEqual(stream['sockopt'],{'futureSockopt':42,'trustedXForwardedFor':['X-Forwarded-For']})
+                self.assertNotIn('sockopt', stream)
 
     def test_deleted_legacy_inbound_stays_deleted_even_with_verified_backup(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -501,7 +501,7 @@ class Architecture(unittest.TestCase):
             arch.reconcile(root)
             with connection(root/'etc/x-ui/x-ui.db') as db:self.assertIsNone(db.execute('SELECT * FROM hosts WHERE id=2').fetchone())
 
-    def test_user_changed_known_sockopt_is_reset_on_owned_inbound_only(self):
+    def test_sockopt_is_disabled_on_owned_xhttp_only(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);fixture(root)
             with connection(root/'etc/x-ui/x-ui.db') as db:
@@ -510,7 +510,7 @@ class Architecture(unittest.TestCase):
                 db.execute('UPDATE inbounds SET stream_settings=? WHERE id=99',(json.dumps(s),))
             custom=records(root)[99]
             arch.reconcile(root)
-            self.assertNotIn('mark',json.loads(records(root)[2]['stream_settings'])['sockopt'])
+            self.assertNotIn('sockopt',json.loads(records(root)[2]['stream_settings']))
             self.assertEqual(records(root)[99],custom)
 
     def test_ambiguous_legacy_signature_is_skipped_without_blocking_update(self):

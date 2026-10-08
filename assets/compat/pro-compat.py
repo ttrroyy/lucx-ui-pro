@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.5'
+REVISION = '2026.10.08-287.6'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3

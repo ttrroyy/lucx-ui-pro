@@ -1333,7 +1333,8 @@ def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_ho
         row['listen'] = SOCKET + ',0666'; row['port'] = 0
         stream['network'] = 'xhttp'; stream['security'] = 'none'
         stream['xhttpSettings'] = reset_xhttp(stream.get('xhttpSettings'), xhttp_path, domains[0])
-        sockopt['trustedXForwardedFor'] = ['X-Forwarded-For']; stream['sockopt'] = sockopt
+        # Managed XHTTP uses a Unix socket; Sockopt is explicitly disabled.
+        stream.pop('sockopt', None)
     row['settings'] = json.dumps(settings, ensure_ascii=False)
     row['stream_settings'] = json.dumps(stream, ensure_ascii=False)
     return row
@@ -1563,7 +1564,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.5'
+REVISION = '2026.10.08-287.6'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
