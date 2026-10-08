@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.3'
+REVISION = '2026.10.08-287.4'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -260,6 +260,11 @@ def meaningful_json(value):
 
 
 def protected_state(root, update_only=False):
+    managed_ids = set()
+    manifest = root / 'var/lib/lucx-ui-preinstall/architecture.json'
+    if update_only and manifest.is_file():
+        managed_ids = {obj['record']['id'] for obj in json.loads(manifest.read_text()).get('objects', {}).values()
+                       if obj.get('present', True) and obj.get('record')}
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise RuntimeError('Panel database integrity check failed')
@@ -296,7 +301,8 @@ def protected_state(root, update_only=False):
                         row[key] = str(row[key])
             if table == 'inbounds':
                 if update_only:
-                    rows = [row for row in rows if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
+                    rows = [row for row in rows if row['id'] not in managed_ids
+                            and row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
                 for row in rows:
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):

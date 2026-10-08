@@ -864,13 +864,13 @@ run_architecture() {
 #!/usr/bin/env python3
 """Reconcile only the XHTTP/REALITY fields and nginx blocks owned by Pro.
 
-The root-only manifest retains identities/keys for recovery, never templates
-existing user records. Unknown fields survive both DB and nginx patches.
+The root-only manifest retains ownership and connection identities. Deleted
+objects are not recreated. Unknown fields survive both DB and nginx patches.
 """
 import argparse
+import base64
 from contextlib import closing
 import copy
-import fnmatch
 import hashlib
 import json
 from pathlib import Path
@@ -892,6 +892,74 @@ LEGACY_SOCKOPT = {
     'tcpUserTimeout': 10000, 'tcpcongestion': 'bbr', 'V6Only': False,
     'tcpWindowClamp': 600, 'interface': '',
 }
+# Explicit fields read by the 286/287 panel/core. Do not infer ownership from
+# unfamiliar keys or replace complete objects: future native fields survive.
+SOCKOPT_FIELDS = set(LEGACY_SOCKOPT) | {
+    'penetrate', 'addressPortStrategy', 'happyEyeballs', 'customSockopt',
+    'trustedXForwardedFor',
+}
+XHTTP_FIELDS = {
+    'path', 'host', 'mode', 'headers', 'xPaddingBytes', 'xPaddingObfsMode',
+    'xPaddingKey', 'xPaddingHeader', 'xPaddingPlacement', 'xPaddingMethod',
+    'sessionIDPlacement', 'sessionIDKey', 'sessionIDTable', 'sessionIDLength',
+    'sessionPlacement', 'sessionKey', 'seqPlacement', 'seqKey',
+    'uplinkDataPlacement', 'uplinkDataKey', 'uplinkHTTPMethod',
+    'scMaxEachPostBytes', 'scMinPostsIntervalMs', 'scMaxBufferedPosts',
+    'scStreamUpServerSecs', 'serverMaxHeaderBytes', 'noSSEHeader',
+    'uplinkChunkSize', 'noGRPCHeader', 'enableXmux',
+}
+
+
+def object_value(value):
+    if isinstance(value, str):
+        try: value = json.loads(value)
+        except (ValueError, TypeError): value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def reset_fields(value, fields, defaults=None):
+    value = copy.deepcopy(object_value(value))
+    for key in fields: value.pop(key, None)
+    value.update(copy.deepcopy(defaults or {}))
+    return value
+
+
+def reset_xhttp(value, path):
+    value = reset_fields(value, XHTTP_FIELDS, {'path': path, 'mode': 'stream-up'})
+    if 'xmux' in value:
+        rest = reset_fields(value['xmux'], {
+            'maxConcurrency', 'maxConnections', 'cMaxReuseTimes',
+            'hMaxRequestTimes', 'hMaxReusableSecs', 'hKeepAlivePeriod'})
+        if rest: value['xmux'] = rest
+        else: value.pop('xmux')
+    if 'extra' in value:
+        rest = reset_xhttp(value.pop('extra'), path)
+        rest.pop('path', None); rest.pop('mode', None)
+        if rest: value['extra'] = rest
+    return value
+
+
+def reset_sockopt(value):
+    original = object_value(value)
+    result = reset_fields(original, SOCKOPT_FIELDS)
+    future = reset_fields(original.get('happyEyeballs'),
+        {'tryDelayMs', 'prioritizeIPv6', 'interleave', 'maxConcurrentTry'})
+    if future: result['happyEyeballs'] = future
+    return result
+
+
+def reality_public_key(private_key):
+    """Derive the share-link key with the installed native core; never rotate keys."""
+    try:
+        if len(base64.urlsafe_b64decode(private_key + '=' * (-len(private_key) % 4))) != 32: return None
+        binary = next(iter(Path('/usr/local/x-ui/bin').glob('xray-linux-*')), None)
+        if not binary: return None
+        result = subprocess.run([str(binary), 'x25519', '-i', private_key], capture_output=True, text=True, timeout=5)
+        if result.returncode: return None
+        match = re.search(r'(?im)^(?:PublicKey|Public key|Password(?:\s*\(PublicKey\))?):\s*(\S+)', result.stdout)
+        return match[1] if match else None
+    except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+        return None  # A new native CLI format must not falsely block update.
 
 
 def atomic(path, text, private=False):
@@ -1073,31 +1141,48 @@ def patch_location(text, path):
 
 def proof(row, kind, domains, xhttp_path, saved_id=None, saved_record=None, host_link=False):
     try:
-        stream = json.loads(row['stream_settings'])
-        if row['protocol'] != 'vless': return False
+        if (row['id'] == saved_id and saved_record and 'created_at' in row
+                and 'created_at' in saved_record and row['created_at'] == saved_record['created_at']):
+            return True  # Panel IDs are AUTOINCREMENT; creation identity survives all option edits.
         if row['id'] == saved_id and host_link:
             return True  # Stable host IDs survive names/transport option edits.
+        if row['protocol'] != ('hysteria' if kind == 'hy2' else 'vless'): return False
+        stream = object_value(row['stream_settings'])
+        if kind == 'hy2':
+            if row['id'] == saved_id and saved_record:
+                old = object_value(saved_record['stream_settings'])
+                password = salamander_password(old)
+                if password and password == salamander_password(stream): return True
+            tls = object_value(stream.get('tlsSettings'))
+            certs = tls.get('certificates', [])
+            if not isinstance(certs, list): certs = []
+            return (not row.get('created_at')  # Pro SQL inserts, unlike native user API creation.
+                    and row['protocol'] == 'hysteria' and stream.get('network') == 'hysteria'
+                    and stream.get('security') == 'tls' and salamander_password(stream)
+                    and row['tag'] == 'inbound-' + str(row['port'])
+                    and any(isinstance(c, dict) and c.get('certificateFile') ==
+                            '/root/cert/' + domains[0] + '/fullchain.pem' for c in certs))
         if row['id'] == saved_id and row['tag'] == TAGS[kind]:
             return True  # Persisted ownership survives native transport option changes.
         if row['id'] == saved_id and saved_record:
-            previous = json.loads(saved_record['stream_settings'])
+            previous = object_value(saved_record['stream_settings'])
             if kind == 'reality':
-                key = previous.get('realitySettings', {}).get('privateKey')
-                if key and key == stream.get('realitySettings', {}).get('privateKey'):
+                key = object_value(previous.get('realitySettings')).get('privateKey')
+                if key and key == object_value(stream.get('realitySettings')).get('privateKey'):
                     return True
             elif stream.get('network') == 'xhttp':
-                old = previous.get('xhttpSettings', {})
-                new = stream.get('xhttpSettings', {})
+                old = object_value(previous.get('xhttpSettings'))
+                new = object_value(stream.get('xhttpSettings'))
                 if old.get('path') and old.get('path') == new.get('path'):
                     return True
         if kind == 'xhttp':
-            config = stream.get('xhttpSettings', {})
+            config = object_value(stream.get('xhttpSettings'))
             transport = (stream.get('network') == 'xhttp'
                          and (config.get('path', '').rstrip('/') == xhttp_path.rstrip('/')
                               or config.get('host') == domains[0]))
             return ((row['tag'] == TAGS[kind] or row['id'] == saved_id or transport)
-                    and row['listen'].split(',')[0] == SOCKET)
-        config = stream.get('realitySettings', {})
+                    and (row.get('listen') or '').split(',')[0] == SOCKET)
+        config = object_value(stream.get('realitySettings'))
         transport = stream.get('security') == 'reality' and stream.get('network') == 'tcp'
         return ((row['tag'] == TAGS[kind] or row['id'] == saved_id or transport)
                 and int(row['port']) == 8443 and bool(config)
@@ -1126,7 +1211,7 @@ def snapshot(db, row):
             'clients': rows(db, 'clients')}
 
 
-def archive_snapshot(root, kind, domains, path):
+def archive_snapshot(root, kind, domains, path, optional=False):
     """Recover keys/records only from checksum-verified Pro backups, newest first."""
     folder = root / 'var/backups/x-ui'
     for archive in sorted(folder.glob('lucx-ui-backup-*.tar.gz'), reverse=True):
@@ -1147,8 +1232,11 @@ def archive_snapshot(root, kind, domains, path):
                 with closing(sqlite3.connect(dbfile)) as db:
                     db.row_factory = sqlite3.Row
                     matches = [r for r in rows(db, 'inbounds') if proof(r, kind, domains, path)]
-                    if len(matches) > 1: raise RuntimeError('Ambiguous managed inbound in backup')
+                    if len(matches) > 1:
+                        if optional: continue
+                        raise RuntimeError('Ambiguous managed inbound in backup')
                     if matches: return snapshot(db, matches[0])
+    if optional: return None
     raise RuntimeError(f'Managed {kind} inbound missing; no verified recovery record. Restore a Pro backup first.')
 
 
@@ -1159,47 +1247,64 @@ def insert(db, table, record):
     db.execute('INSERT INTO "' + table + '" (' + ','.join('"' + k + '"' for k in keys) + ') VALUES (' + ','.join('?' for _ in keys) + ')', list(record.values()))
 
 
-def restore(db, saved):
-    row = copy.deepcopy(saved['record'])
-    old_id = row['id']
-    if db.execute('SELECT 1 FROM inbounds WHERE id=?', (old_id,)).fetchone():
-        row['id'] = db.execute('SELECT COALESCE(MAX(id),0)+1 FROM inbounds').fetchone()[0]
-    live = {r['id']: r for r in rows(db, 'clients')}
-    valid = {r['id'] for r in saved.get('clients', []) if r['id'] in live
-             and r.get('uuid') == live[r['id']].get('uuid') and r.get('email') == live[r['id']].get('email')}
-    settings = json.loads(row['settings'])
-    emails = {live[c]['email'] for c in valid}
-    filtered = [c for c in settings.get('clients', []) if c.get('email') in emails]
-    if filtered != settings.get('clients', []):
-        settings['clients'] = filtered
-        row['settings'] = json.dumps(settings, ensure_ascii=False)
-    insert(db, 'inbounds', row)
-    for table, entries in (('hosts', saved.get('hosts', [])), ('client_inbounds', saved.get('memberships', []))):
-        for original in entries:
-            if table == 'client_inbounds' and original['client_id'] not in valid: continue
-            item = dict(original); item['inbound_id'] = row['id']; item.pop('id', None)
-            insert(db, table, item)
-    for original in saved.get('traffic', []):
-        # Traffic is globally keyed by email in the panel. Never overwrite a
-        # surviving record belonging to another inbound/client.
-        if original.get('email') not in emails: continue
-        if db.execute('SELECT 1 FROM client_traffics WHERE email=?', (original['email'],)).fetchone(): continue
-        item = dict(original); item['inbound_id'] = row['id']
-        if db.execute('SELECT 1 FROM client_traffics WHERE id=?', (item['id'],)).fetchone(): item.pop('id')
-        insert(db, 'client_traffics', item)
-    return row
+def salamander_password(stream):
+    masks = object_value(stream.get('finalmask')).get('udp', [])
+    if not isinstance(masks, list): return None
+    return next((object_value(m.get('settings')).get('password') for m in masks
+                 if isinstance(m, dict) and m.get('type') == 'salamander'), None)
 
 
 def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_hosts=None):
     row = copy.deepcopy(row)
-    stream = json.loads(row['stream_settings'])
+    row['protocol'] = 'hysteria' if kind == 'hy2' else 'vless'
+    stream = object_value(row['stream_settings'])
+    stream.pop('method', None)  # This native alias overrides network in Xray.
+    stream.pop('externalProxy', None)  # Managed hosts describe the public entry.
+    sockopt = reset_sockopt(stream.get('sockopt'))
+    if sockopt: stream['sockopt'] = sockopt
+    else: stream.pop('sockopt', None)
+    settings = object_value(row['settings'])
+    previous_stream = object_value(saved['record']['stream_settings']) if saved else {}
+    if kind == 'hy2':
+        row['listen'] = ''
+        row['port'] = saved.get('architecture_port', saved['record']['port']) if saved else row['port']
+        settings['version'] = 2
+        stream['network'] = 'hysteria'; stream['security'] = 'tls'
+        stream['hysteriaSettings'] = reset_fields(stream.get('hysteriaSettings'),
+            {'version', 'udpIdleTimeout', 'auth', 'masquerade'}, {'version': 2, 'udpIdleTimeout': 60})
+        tls = object_value(stream.get('tlsSettings'))
+        tls.update(serverName=domains[0], minVersion='1.2', maxVersion='1.3',
+                   cipherSuites='', rejectUnknownSni=False, disableSystemRoot=False,
+                   enableSessionResumption=False, alpn=['h3'])
+        old_certs = tls.get('certificates', [])
+        cert = copy.deepcopy(old_certs[0]) if old_certs and isinstance(old_certs[0], dict) else {}
+        cert.update(useFile=True, certificateFile='/root/cert/'+domains[0]+'/fullchain.pem',
+                    keyFile='/root/cert/'+domains[0]+'/privkey.pem', certificate=[], key=[],
+                    ocspStapling=0, oneTimeLoading=False, usage='encipherment', buildChain=False)
+        tls['certificates'] = [cert]
+        client_tls = object_value(tls.get('settings'))
+        client_tls.update(fingerprint='', echConfigList='', pinnedPeerCertSha256=[], verifyPeerCertByName='')
+        tls['settings'] = client_tls
+        stream['tlsSettings'] = tls
+        password = salamander_password(stream) or salamander_password(previous_stream)
+        if not password: raise RuntimeError('Managed HY2 obfuscation secret missing; no saved recovery value')
+        finalmask = object_value(stream.get('finalmask'))
+        masks = finalmask.get('udp', [])
+        mask = next((copy.deepcopy(m) for m in masks if isinstance(m, dict) and m.get('type') == 'salamander'), {})
+        mask['type'] = 'salamander'
+        mask_settings = object_value(mask.get('settings')); mask_settings['password'] = password
+        mask['settings'] = mask_settings
+        finalmask.update(tcp=[], udp=[mask]); stream['finalmask'] = finalmask
+    else:
+        settings.update(decryption='none', encryption='none', fallbacks=[])
+        stream.pop('finalmask', None)
     if kind == 'reality':
         row['listen'] = '127.0.0.1'
         row['port'] = 8443
         stream['network'] = 'tcp'
         stream['security'] = 'reality'
-        config = stream.setdefault('realitySettings', {})
-        previous = json.loads(saved['record']['stream_settings']).get('realitySettings', {}) if saved else {}
+        config = object_value(stream.get('realitySettings'))
+        previous = object_value(previous_stream.get('realitySettings'))
         for field in ('privateKey', 'shortIds'):
             if not config.get(field):
                 if not previous.get(field):
@@ -1207,39 +1312,35 @@ def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_ho
                 config[field] = copy.deepcopy(previous[field])
         config['target'] = '127.0.0.1:9443'
         config['xver'] = 0  # Cover 9443 accepts TLS without a PROXY prefix.
+        config.update(show=False, minClientVer='', maxClientVer='', maxTimediff=0)
+        for alias in ('minClient', 'maxClient'): config.pop(alias, None)
         if 'dest' in config: config['dest'] = config['target']
-        if domains and domains[1] not in config.get('serverNames', []):
-            config.setdefault('serverNames', []).append(domains[1])
-        tcp = stream.setdefault('tcpSettings', {})
+        if domains: config['serverNames'] = [domains[1]]
+        client = object_value(config.get('settings'))
+        public_key = reality_public_key(config['privateKey'])
+        if public_key: client['publicKey'] = public_key
+        if not client.get('publicKey') and object_value(previous.get('settings')).get('publicKey'):
+            client['publicKey'] = previous['settings']['publicKey']
+        client.update(fingerprint='firefox', serverName='', spiderX='/')
+        config['settings'] = client; stream['realitySettings'] = config
+        tcp = object_value(stream.get('tcpSettings'))
         tcp['acceptProxyProtocol'] = True
-        tcp.setdefault('header', {})['type'] = 'none'
-        row['stream_settings'] = json.dumps(stream, ensure_ascii=False)
-        return row
-    row['listen'] = SOCKET + ',0666'
-    row['port'] = 0
-    stream['network'] = 'xhttp'
-    stream['security'] = 'none'
-    config = stream.setdefault('xhttpSettings', {})
-    config['mode'] = 'stream-up'
-    # Empty/absent host is a valid native choice. Keep host restrictions that
-    # accept a managed nginx name; fix only an incompatible restriction (404).
-    host = config.get('host')
-    if domains and host and not any(fnmatch.fnmatchcase(name.lower(), host.lower())
-                                   for name in (permitted_hosts or [domains[0]])):
-        config['host'] = domains[0]
-    if xhttp_path is not None and config.get('path', '').rstrip('/') != xhttp_path.rstrip('/'):
-        config['path'] = xhttp_path
-    sockopt = stream.setdefault('sockopt', {})
-    for key, old in LEGACY_SOCKOPT.items():
-        if sockopt.get(key) == old: sockopt.pop(key, None)
-    # Xray expects header names here, not proxy IP addresses. The UDS is private.
-    sockopt['trustedXForwardedFor'] = ['X-Forwarded-For']
+        tcp['header'] = reset_fields(tcp.get('header'), {'type', 'request', 'response'}, {'type': 'none'})
+        stream['tcpSettings'] = tcp
+    elif kind == 'xhttp':
+        row['listen'] = SOCKET + ',0666'; row['port'] = 0
+        stream['network'] = 'xhttp'; stream['security'] = 'none'
+        stream['xhttpSettings'] = reset_xhttp(stream.get('xhttpSettings'), xhttp_path)
+        sockopt['trustedXForwardedFor'] = ['X-Forwarded-For']; stream['sockopt'] = sockopt
+    row['settings'] = json.dumps(settings, ensure_ascii=False)
     row['stream_settings'] = json.dumps(stream, ensure_ascii=False)
     return row
 
 
 def protect_managed_identity(db, row, saved, kind):
     """Protect connection identities only, not native options/schema changes."""
+    if not saved.get('protect_for_update'):
+        return  # Long-lived ownership snapshots are not a ban on native user edits.
     relevant = {r['client_id'] for r in saved.get('memberships', [])}
     previous = {r['id']: r for r in saved.get('clients', []) if r['id'] in relevant}
     current = {r['id']: r for r in rows(db, 'clients')}
@@ -1253,6 +1354,33 @@ def protect_managed_identity(db, row, saved, kind):
             raise RuntimeError('Managed REALITY private key changed during panel update')
         if not set(old.get('shortIds', [])).issubset(new.get('shortIds', [])):
             raise RuntimeError('Managed REALITY shortIds lost during panel update')
+
+
+def patch_hosts(db, row, kind, saved, domains):
+    # Only the original host IDs, not extra hosts a user added to this inbound.
+    # Older manifests stored all hosts: the installer creates exactly one,
+    # whose lowest ID precedes additional user hosts.
+    entries = sorted((saved or {}).get('hosts', []), key=lambda h: h['id'])
+    identifiers = (saved or {}).get('managed_host_ids', [entries[0]['id']] if entries else [])
+    defaults = {'address': domains[0], 'port': row['port'] if kind == 'hy2' else 443,
+                'security': 'tls' if kind == 'xhttp' else 'same',
+                'fingerprint': 'firefox' if kind == 'xhttp' else '',
+                'alpn': '["h2","http/1.1"]' if kind == 'xhttp' else '[]',
+                'sni': '', 'host_header': '', 'path': '', 'cipher_suites': '',
+                'override_sni_from_address': 0, 'keep_sni_blank': 0,
+                'pinned_peer_cert_sha256': '[]', 'verify_peer_cert_by_name': '',
+                'allow_insecure': 0, 'ech_config_list': '', 'mux_params': '',
+                'sockopt_params': '', 'final_mask': '', 'vless_route': ''}
+    columns = {r[1] for r in db.execute('PRAGMA table_info(hosts)')}
+    defaults = {k:v for k,v in defaults.items() if k in columns}
+    for identifier in identifiers:
+        host = db.execute('SELECT * FROM hosts WHERE id=? AND inbound_id=?', (identifier, row['id'])).fetchone()
+        if not host: continue  # User deletion is intentional, never recreate.
+        changed = {k:v for k,v in defaults.items() if host[k] != v}
+        if changed:
+            db.execute('UPDATE hosts SET '+','.join('"'+k+'"=?' for k in changed)+' WHERE id=?',
+                       [*changed.values(), identifier])
+    return identifiers
 
 
 def reconcile(root, remember=False, changes=None):
@@ -1288,49 +1416,68 @@ def reconcile(root, remember=False, changes=None):
         live_hosts = rows(db, 'hosts')
         new_manifest = {'format': 1, 'domains': domains, 'objects': {},
                         'nginx_files': {kind: path.relative_to(root).as_posix() for kind, path in paths.items()}}
-        for kind in ('xhttp', 'reality'):
+        for kind in ('xhttp', 'reality', 'hy2'):
             saved = manifest.get('objects', {}).get(kind)
+            selection_file = root / STATE / 'hy2-ownership.json'
+            selection = json.loads(selection_file.read_text()) if kind == 'hy2' and selection_file.is_file() else {}
+            if kind == 'hy2' and selection.get('selected') is False:
+                continue
             def identify(saved):
                 saved_id = saved['record']['id'] if saved else None
-                host_ids = {h['id'] for h in saved.get('hosts', [])} if saved else set()
+                entries = sorted(saved.get('hosts', []), key=lambda h:h['id']) if saved else []
+                host_ids = set(saved.get('managed_host_ids', [entries[0]['id']] if entries else [])) if saved else set()
                 host_link = any(h['id'] in host_ids and h['inbound_id'] == saved_id for h in live_hosts)
                 return [r for r in all_rows if proof(r, kind, domains, xhttp_path, saved_id,
                                                      saved['record'] if saved else None, host_link)]
             candidates = identify(saved)
+            if kind == 'hy2' and selection.get('selected') and not saved:
+                row = next((r for r in all_rows if r['id'] == selection['id'] and r['protocol'] == 'hysteria'), None)
+                if row:
+                    saved = snapshot(db, row)
+                    saved.update(architecture_port=selection['port'], managed_host_ids=[selection['host_id']])
+                    candidates = identify(saved)
             if not candidates and not saved:
                 # Legacy installs have no manifest. Verified backups retain the
                 # stable IDs/host links even when the user changed the transport.
-                saved = archive_snapshot(root, kind, domains, xhttp_path)
+                saved = archive_snapshot(root, kind, domains, xhttp_path, optional=True)
                 candidates = identify(saved)
-            # A reused ID is a user object, not an incompatibility: leave it alone
-            # and recover the missing managed object using another free ID.
-            if len(candidates) > 1: raise RuntimeError(f'Duplicate managed {kind} inbounds')
+            # Persisted identities take precedence over coincidental signatures.
+            if saved:
+                exact = [r for r in candidates if r['id'] == saved['record']['id']]
+                candidates = exact
+            if len(candidates) > 1:
+                print(f'Skipped ambiguous {kind} ownership; user objects left unchanged')
+                continue
             if not candidates:
-                # Reject partial identities rather than generate a duplicate next to a changed/user object.
-                if kind == 'xhttp' and any(r.get('listen', '').split(',')[0] == SOCKET for r in all_rows):
-                    raise RuntimeError('Required XHTTP Unix socket is occupied by another inbound')
-                saved = saved or archive_snapshot(root, kind, domains, xhttp_path)
-                if not proof(saved['record'], kind, domains, xhttp_path, saved['record']['id'],
-                             saved['record'], bool(saved.get('hosts'))):
-                    raise RuntimeError('Invalid saved managed identity')
-                if remember:
-                    new_manifest['objects'][kind] = saved
-                    continue
-                row = restore(db, saved)
-                print(f'Restored managed {kind} inbound #{row["id"]}')
-            else:
-                row = candidates[0]
+                # Update normalizes surviving objects only. Keep proof for a
+                # subsequent run, but never resurrect intentionally deleted rows.
+                if saved:
+                    new_manifest['objects'][kind] = copy.deepcopy(saved)
+                    new_manifest['objects'][kind]['present'] = False
+                print(f'Skipped absent/unidentified managed {kind}; nothing created')
+                continue
+            row = candidates[0]
+            if not saved:
+                saved = snapshot(db, row)
+                saved['managed_host_ids'] = [h['id'] for h in sorted(saved['hosts'], key=lambda h:h['id'])[:1]]
             patched = canonical(row, kind, xhttp_path, saved, domains, permitted_hosts)
             if not remember:
                 if saved: protect_managed_identity(db, patched, saved, kind)
-                for field in ('listen', 'port', 'stream_settings'):
+                for field in ('protocol', 'listen', 'port', 'settings', 'stream_settings'):
                     if patched[field] != row[field]:
                         db.execute('UPDATE inbounds SET "' + field + '"=? WHERE id=?', (patched[field], row['id']))
                 row = dict(db.execute('SELECT * FROM inbounds WHERE id=?', (row['id'],)).fetchone())
+                host_ids = patch_hosts(db, row, kind, saved, domains)
+            else:
+                entries = sorted(saved.get('hosts', []), key=lambda h:h['id'])
+                host_ids = saved.get('managed_host_ids', [entries[0]['id']] if entries else [])
             # Preserve the last recoverable key/transport identity even if the
             # current form temporarily cleared required fields. DB stays untouched
             # during remember; reconciliation applies the owned-field patch later.
             new_manifest['objects'][kind] = snapshot(db, patched if remember else row)
+            new_manifest['objects'][kind].update(managed_host_ids=host_ids, present=True)
+            if remember: new_manifest['objects'][kind]['protect_for_update'] = True
+            if kind == 'hy2': new_manifest['objects'][kind]['architecture_port'] = patched['port']
         # File patches were fully parsed/validated before the first DB mutation.
         if not remember:
             for file, text in planned_files.items():
@@ -1361,6 +1508,15 @@ def wait_listeners(ports, xhttp_enabled, timeout=20):
         time.sleep(0.5)
 
 
+def wait_hy2_listener(port, timeout=20):
+    deadline = time.monotonic() + timeout
+    while True:
+        addresses = [line.split()[3] for line in subprocess.check_output(['ss','-H','-lnu'], text=True).splitlines()]
+        if any(address.rsplit(':',1)[-1] == str(port) for address in addresses): return
+        if time.monotonic() >= deadline: raise RuntimeError('Managed HY2 UDP listener is missing')
+        time.sleep(0.5)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('reconcile', 'remember', 'main-vhost', 'validate-live'))
@@ -1372,12 +1528,16 @@ def main():
         if root != Path('/'): raise RuntimeError('Live validation requires the actual system root')
         # Check only our listeners; other inbound ports/routing are not a contract.
         manifest = json.loads((root / STATE / 'architecture.json').read_text())
-        managed_id = manifest['objects']['reality']['record']['id']
         with closing(sqlite3.connect('/etc/x-ui/x-ui.db')) as db:
-            enabled = db.execute('SELECT enable FROM inbounds WHERE id=?', (managed_id,)).fetchone()[0]
-            xhttp_enabled = db.execute('SELECT enable FROM inbounds WHERE id=?',
-                                      (manifest['objects']['xhttp']['record']['id'],)).fetchone()[0]
-        wait_listeners((7443, 9443, *((8443,) if enabled else ())), xhttp_enabled)
+            def enabled(kind):
+                obj = manifest['objects'].get(kind, {})
+                if not obj.get('present', True) or not obj.get('record'): return False
+                row = db.execute('SELECT enable FROM inbounds WHERE id=?', (obj['record']['id'],)).fetchone()
+                return bool(row and row[0])
+            reality_enabled, xhttp_enabled = enabled('reality'), enabled('xhttp')
+            hy2_port = manifest['objects']['hy2']['record']['port'] if enabled('hy2') else None
+        wait_listeners((7443, 9443, *((8443,) if reality_enabled else ())), xhttp_enabled)
+        if hy2_port is not None: wait_hy2_listener(hy2_port)
         print('Managed listeners validated: public 443 IPv4/IPv6; internal loopback only.')
     elif args.action == 'main-vhost': print(layout(root)['xhttp'])
     else: reconcile(root, args.action == 'remember', args.changes)
@@ -1400,7 +1560,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.3'
+REVISION = '2026.10.08-287.4'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -1652,6 +1812,11 @@ def meaningful_json(value):
 
 
 def protected_state(root, update_only=False):
+    managed_ids = set()
+    manifest = root / 'var/lib/lucx-ui-preinstall/architecture.json'
+    if update_only and manifest.is_file():
+        managed_ids = {obj['record']['id'] for obj in json.loads(manifest.read_text()).get('objects', {}).values()
+                       if obj.get('present', True) and obj.get('record')}
     with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise RuntimeError('Panel database integrity check failed')
@@ -1688,7 +1853,8 @@ def protected_state(root, update_only=False):
                         row[key] = str(row[key])
             if table == 'inbounds':
                 if update_only:
-                    rows = [row for row in rows if row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
+                    rows = [row for row in rows if row['id'] not in managed_ids
+                            and row['protocol'] in ('qwdtt','csqtt','tproxy','olcrtc','openflux')]
                 for row in rows:
                     settings = json.loads(row['settings'])
                     if not isinstance(settings, dict):
