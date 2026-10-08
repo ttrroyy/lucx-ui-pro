@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.08-287.4"
+PRO_COMPAT_REVISION="2026.10.08-287.5"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -2300,8 +2300,10 @@ def reset_fields(value, fields, defaults=None):
     return value
 
 
-def reset_xhttp(value, path):
-    value = reset_fields(value, XHTTP_FIELDS, {'path': path, 'mode': 'stream-up'})
+def reset_xhttp(value, path, host=None):
+    defaults = {'path': path, 'mode': 'stream-up'}
+    if host: defaults['host'] = host
+    value = reset_fields(value, XHTTP_FIELDS, defaults)
     if 'xmux' in value:
         rest = reset_fields(value['xmux'], {
             'maxConcurrency', 'maxConnections', 'cMaxReuseTimes',
@@ -2706,7 +2708,7 @@ def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_ho
     elif kind == 'xhttp':
         row['listen'] = SOCKET + ',0666'; row['port'] = 0
         stream['network'] = 'xhttp'; stream['security'] = 'none'
-        stream['xhttpSettings'] = reset_xhttp(stream.get('xhttpSettings'), xhttp_path)
+        stream['xhttpSettings'] = reset_xhttp(stream.get('xhttpSettings'), xhttp_path, domains[0])
         sockopt['trustedXForwardedFor'] = ['X-Forwarded-For']; stream['sockopt'] = sockopt
     row['settings'] = json.dumps(settings, ensure_ascii=False)
     row['stream_settings'] = json.dumps(stream, ensure_ascii=False)
@@ -2742,7 +2744,8 @@ def patch_hosts(db, row, kind, saved, domains):
                 'security': 'tls' if kind == 'xhttp' else 'same',
                 'fingerprint': 'firefox' if kind == 'xhttp' else '',
                 'alpn': '["h2","http/1.1"]' if kind == 'xhttp' else '[]',
-                'sni': '', 'host_header': '', 'path': '', 'cipher_suites': '',
+                'sni': domains[0] if kind == 'xhttp' else '',
+                'host_header': domains[0] if kind == 'xhttp' else '', 'path': '', 'cipher_suites': '',
                 'override_sni_from_address': 0, 'keep_sni_blank': 0,
                 'pinned_peer_cert_sha256': '[]', 'verify_peer_cert_by_name': '',
                 'allow_insecure': 0, 'ech_config_list': '', 'mux_params': '',
@@ -2936,7 +2939,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.08-287.4'
+REVISION = '2026.10.08-287.5'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -5331,6 +5334,7 @@ VALUES (
   "network": "xhttp",
   "security": "none",
   "xhttpSettings": {
+    "host": "${domain}",
     "path": "/${xhttp_path}",
     "mode": "stream-up"
   },
@@ -5342,10 +5346,10 @@ VALUES (
     '{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
 );
 
-INSERT INTO "hosts" ("inbound_id",${gid_col}"sort_order","remark","address","port","security","fingerprint","alpn")
+INSERT INTO "hosts" ("inbound_id",${gid_col}"sort_order","remark","address","port","security","fingerprint","alpn","sni","host_header")
 VALUES
-    ((SELECT id FROM inbounds WHERE tag='inbound-8443'),           ${gid_reality} 0, 'tcp-reality', '${domain}', 443, 'same', '',        '[]'),
-    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp-tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]');
+    ((SELECT id FROM inbounds WHERE tag='inbound-8443'),           ${gid_reality} 0, 'tcp-reality', '${domain}', 443, 'same', '',        '[]', '', ''),
+    ((SELECT id FROM inbounds WHERE tag='inbound-/dev/shm/uds2023.sock,0666:0|'), ${gid_xhttp} 0, 'xhttp-tls', '${domain}', 443, 'tls', 'firefox', '["h2","http/1.1"]', '${domain}', '${domain}');
 EOF
 
     /usr/local/x-ui/x-ui setting \

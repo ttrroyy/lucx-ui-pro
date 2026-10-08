@@ -110,6 +110,23 @@ def add_hy2(root):
 
 
 class Architecture(unittest.TestCase):
+    def test_owned_xhttp_host_sni_repair_preserves_additional_user_host(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);fixture(root)
+            with connection(root/'etc/x-ui/x-ui.db') as db:
+                db.executescript("ALTER TABLE hosts ADD COLUMN sni TEXT DEFAULT '';"
+                                 "ALTER TABLE hosts ADD COLUMN host_header TEXT DEFAULT '';"
+                                 "INSERT INTO hosts VALUES(50,2,'user.example',1111,'user-extra','user.sni','user.host');")
+            for attempt in range(2):
+                arch.reconcile(root,remember=True);arch.reconcile(root)
+                with connection(root/'etc/x-ui/x-ui.db') as db:
+                    self.assertEqual(db.execute('SELECT sni,host_header FROM hosts WHERE id=2').fetchone(),
+                                     ('main.example','main.example'))
+                    self.assertEqual(db.execute('SELECT sni,host_header FROM hosts WHERE id=1').fetchone(),('',''))
+                    self.assertEqual(db.execute('SELECT sni,host_header FROM hosts WHERE id=50').fetchone(),
+                                     ('user.sni','user.host'))
+                self.assertEqual(json.loads(records(root)[2]['stream_settings'])['xhttpSettings']['host'],'main.example')
+
     def test_subscription_probe_ignores_deleted_disabled_and_custom_only_nodes(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);fixture(root);arch.reconcile(root)
@@ -399,7 +416,7 @@ class Architecture(unittest.TestCase):
                     db.execute('UPDATE inbounds SET stream_settings=? WHERE id=2',(json.dumps(stream),))
                 arch.reconcile(root)
                 stream=json.loads(records(root)[2]['stream_settings'])
-                self.assertEqual(stream['xhttpSettings'],{'path':'/secret','mode':'stream-up','future':'keep',
+                self.assertEqual(stream['xhttpSettings'],{'host':'main.example','path':'/secret','mode':'stream-up','future':'keep',
                     'xmux':{'future':7},'extra':{'futureExtra':9}})
                 self.assertEqual(stream['sockopt'],{'futureSockopt':42,'trustedXForwardedFor':['X-Forwarded-For']})
 
@@ -416,7 +433,7 @@ class Architecture(unittest.TestCase):
             arch.reconcile(root);arch.reconcile(root)
             self.assertNotIn(1,records(root))
 
-    def test_removed_native_host_and_new_security_fields_do_not_block_patch(self):
+    def test_missing_xhttp_host_is_restored_and_new_native_fields_survive(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);fixture(root)
             with connection(root/'etc/x-ui/x-ui.db') as db:
@@ -426,7 +443,7 @@ class Architecture(unittest.TestCase):
                 db.execute('UPDATE inbounds SET stream_settings=? WHERE id=2',(json.dumps(stream),))
             arch.reconcile(root)
             stream=json.loads(records(root)[2]['stream_settings'])
-            self.assertNotIn('host',stream['xhttpSettings'])
+            self.assertEqual(stream['xhttpSettings']['host'],'main.example')
             self.assertEqual(stream['newNativeOptions'],{'something':42})
 
     def test_missing_managed_transport_options_repaired_unknown_values_preserved(self):
