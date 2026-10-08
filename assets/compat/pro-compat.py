@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-REVISION = '2026.10.07-286.6'
+REVISION = '2026.10.08-287.2'
 PROTOCOLS = "('qwdtt','csqtt','tproxy','olcrtc','openflux')"
 
 
@@ -450,6 +450,7 @@ def repair_nginx(root, settings):
     template = root / 'var/www/subpage/clash.yaml.tpl'
     if template.is_file():
         text = template.read_text(encoding='utf-8')
+        original_template = text
         text, count = re.subn(
             r'(?m)^(    url: https://[^/\s]+)/[^/\s]+/\$\{SUB_ID\}\?provider=1$',
             r'\1/__lucx_provider/${SUB_ID}', text)
@@ -459,14 +460,48 @@ def repair_nginx(root, settings):
             raise RuntimeError('Clash nginx snippet is missing')
         route = provider_route(settings)
         original = snippet.read_text(encoding='utf-8')
-        cleaned = re.sub(r'    # LUCX PRO native provider BEGIN\n.*?    # LUCX PRO native provider END\n',
-                         '', original, flags=re.S)
-        snippet.write_text(route + cleaned, encoding='utf-8')
-        template.write_text(text, encoding='utf-8')
+        marker = r'    # LUCX PRO native provider BEGIN\n.*?    # LUCX PRO native provider END\n'
+        existing = re.search(marker, original, re.S)
+        if existing:
+            block = existing[0]
+            # Patch only the managed destination/path, retaining extra headers,
+            # timeouts and unknown user directives inside our provider location.
+            for directive in ('rewrite', 'proxy_pass'):
+                target = re.search(r'(?m)^        ' + directive + r' [^\n]+$', route)[0]
+                block, count = re.subn(r'(?m)^        ' + directive + r' [^\n]+$', lambda _: target, block)
+                if not count:
+                    closing = block.rfind('\n    }')
+                    if closing == -1: raise RuntimeError('Managed provider location is incomplete')
+                    block = block[:closing] + '\n' + target + block[closing:]
+            repaired = original[:existing.start()] + block + original[existing.end():]
+        else:
+            repaired = route + original
+        if repaired != original:
+            snippet.write_text(repaired, encoding='utf-8')
+        if text != original_template:
+            template.write_text(text, encoding='utf-8')
     # Match only the saved panel port; Xray inbound HTTP proxies remain HTTP.
     panel_port = int(settings.get('webPort', 54321))
     scheme = 'https' if settings.get('webCertFile') and settings.get('webKeyFile') else 'http'
-    for path in (root / 'etc/nginx/sites-available').glob('*.conf'):
+    domain_file = root / 'var/lib/lucx-ui-preinstall/domains'
+    managed_domains = domain_file.read_text().splitlines()[:2] if domain_file.is_file() else []
+    identity = root / 'var/lib/lucx-ui-preinstall/architecture.json'
+    if identity.is_file():
+        names = json.loads(identity.read_text(encoding='utf-8')).get('nginx_files', {}).values()
+        managed_files = [root / name for name in names
+                         if name.startswith('etc/nginx/sites-available/') and '..' not in Path(name).parts]
+    else:
+        managed_files = [root / 'etc/nginx/sites-available' / domain for domain in managed_domains]
+    for path in managed_files:
+        if not path.is_file():
+            continue
+        candidate = path.read_text(encoding='utf-8')
+        if not any(domain in [name for value in re.findall(r'\bserver_name\s+([^;]+);', candidate)
+                              for name in value.split()]
+                   and f'/etc/letsencrypt/live/{domain}/fullchain.pem' in candidate
+                   and 'include /etc/nginx/snippets/includes.conf;' in candidate
+                   for domain in managed_domains):
+            continue
         text = path.read_text(encoding='utf-8')
         repaired = re.sub(r'proxy_pass https?://127\.0\.0\.1:' + str(panel_port) + r'(?=[/;])',
                           f'proxy_pass {scheme}://127.0.0.1:{panel_port}', text)
