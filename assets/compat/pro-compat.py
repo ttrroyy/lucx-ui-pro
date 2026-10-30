@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.10.29-331.1'
+REVISION = '2026.10.29-332.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -324,9 +324,10 @@ def protected_state(root, update_only=False):
                         row[key] = ''
                     if key == 'wg_keep_alive':
                         # Native 3.11 splits AWG ranges; compare the effective value across schemas.
-                        row[key] = str(row[key] or 0)
-                        if row[key] == '0' and row.get('wg_keep_alive_range'):
-                            row[key] = str(row['wg_keep_alive_range'])
+                        row[key] = str(row[key] or 0).strip() or '0'
+                        ranged = str(row.get('wg_keep_alive_range') or '').strip()
+                        if row[key] == '0' and ranged:
+                            row[key] = ranged
                 row.pop('wg_keep_alive_range', None)
             if table == 'inbounds':
                 if update_only:

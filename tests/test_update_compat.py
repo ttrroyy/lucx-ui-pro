@@ -32,7 +32,7 @@ def database(root):
 
 class UpdateCompatibility(unittest.TestCase):
     def test_keepalive_storage_migration_preserves_value_and_detects_loss(self):
-        for value in ('25', '15-25', '0-0', '0', ''):
+        for value in ('25', '15-25', '0-0', '0', '', chr(32) * 2, chr(32) + '15-25' + chr(32)):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as folder:
                 root=Path(folder)
                 with closing(database(root)) as db:
@@ -40,7 +40,8 @@ class UpdateCompatibility(unittest.TestCase):
                     db.execute('UPDATE clients SET wg_keep_alive=?',(value,));db.commit()
                     state=root/'state.json';state.write_text(json.dumps(compat.protected_state(root)))
                     db.execute("ALTER TABLE clients ADD COLUMN wg_keep_alive_range TEXT DEFAULT ''")
-                    scalar,ranged=(0,value) if '-' in value else (int(value or 0),'')
+                    normalized=value.strip()
+                    scalar,ranged=(0,normalized) if '-' in normalized else (int(normalized or 0),'')
                     db.execute('UPDATE clients SET wg_keep_alive=?,wg_keep_alive_range=?',(scalar,ranged));db.commit()
                     before='\n'.join(db.iterdump())
                     compat.preserve_client_flow(root,state);compat.verify_state(root,state)
