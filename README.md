@@ -3,7 +3,7 @@
 Автоматическая установка панели [lucx-ui](https://github.com/AlexeyLCP/lucx-ui) с nginx, SSL, автосозданием инбаундов, автогенерацией доменов (только для теста, повышенный риск бана ТСПУ), сайтом заглушкой, self-hosted DoH, fail2ban, защитой от сканеров, настройкой DNS в xray, а также поддержкой Clash/Mihomo подписки.
 
 - Debian 12,13 / Ubuntu 24,26
-- Один домен или поддомен с A-записью на IPv4 VPS: общий для панели, подписок/DNS, REALITY, XHTTP TLS и опционального Telegram WEB-proxy. TLS обслуживает nginx.
+- Один домен или поддомен с A-записью на IPv4 VPS: общий для панели, подписок/DNS, REALITY, XHTTP TLS и опционального Telegram WEB-proxy.
 
 ---
 
