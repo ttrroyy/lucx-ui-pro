@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.29-332.1"
+PRO_COMPAT_REVISION="2026.10.31-333.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -844,6 +844,19 @@ if not m or tuple(map(int,m.groups())) < (3,9,0,286):
     raise SystemExit('Функция -update не поддерживается на данной версии панели. Требуется v3.9.0-lucx.286 или новее.')
 PY_MIN_UPDATE
     [[ $? -eq 0 ]] || return 1
+    local ONE_DOMAIN=""
+    ONE_DOMAIN=$(python3 - "$PREINSTALL_STATE_DIR/domains" <<'PY_UPDATE_ONE_DOMAIN'
+from pathlib import Path
+import re, sys
+domains = Path(sys.argv[1]).read_text().splitlines()
+if len(domains) < 2 or any(not re.fullmatch(r'[A-Za-z0-9.-]+', d) for d in domains[:2]):
+    raise SystemExit('Managed domains are missing or invalid')
+if any(d and d != domains[0] for d in domains[1:]): print('y')
+PY_UPDATE_ONE_DOMAIN
+) || return 1
+    if [[ "$ONE_DOMAIN" == y ]]; then
+        msg_inf 'Первое обновление объединит REALITY, XHTTP и Telegram на домене панели. После перехода обновите подписки VLESS и ссылку Telegram WEB-proxy.'
+    fi
     fetch_release_info latest "$stage/latest.json" || return 1
     latest=$(release_tag "$stage/latest.json") || return 1
     target="${PANEL_VERSION:-latest}"
@@ -887,6 +900,9 @@ PY_PRO_COMMIT
     fi
     while true; do
         msg_err 'Обслуживание остановит панель и VPN-соединения. Сначала будет создан полный backup.'
+        if [[ "${1:-}" == architecture-only ]]; then
+            choice=2; UPDATE_TARGET="$installed"; break
+        fi
         echo "Текущая версия: $installed$([[ "$installed" != "$latest" ]] || printf ' (latest)')"
         if [[ "$installed" != "$target" ]]; then
             echo "  1) Обновить панель до $target и актуализировать архитектуру lucx"
@@ -943,6 +959,9 @@ PY_NO_DOWNGRADE
         /usr/local/sbin/lucx-awg-sysctl-guard /etc/systemd/system
         /var/www /var/lib/lucx-ui-preinstall /opt/AdGuardHome/AdGuardHome.yaml
         /etc/logrotate.d/nginx /etc/systemd/journald.conf.d/99-lucx-ui-pro-logs.conf)
+    if [[ "$ONE_DOMAIN" == y || -s "$PREINSTALL_STATE_DIR/retired-domains.json" ]]; then
+        snapshot_entries+=(/etc/letsencrypt /root/cert /root/.lucx-tg-web-proxy-info)
+    fi
     local cert_paths cert_path
     cert_paths=$(python3 - "$XUIDB" <<'PY_UPDATE_CERT_FILES'
 from pathlib import Path
@@ -1032,7 +1051,9 @@ PY_UPDATE_CERT_FILES
     fi
     (( failed )) || run_pro_compat verify --state "$stage/protected-state.json" --before-repair || failed=1
     (( failed )) || run_pro_compat probe || failed=1
-    (( failed )) || run_architecture reconcile --changes "$stage/architecture-changes.json" || failed=1
+    local architecture_action=reconcile
+    [[ "$ONE_DOMAIN" != y ]] || architecture_action=unify-domain
+    (( failed )) || run_architecture "$architecture_action" --changes "$stage/architecture-changes.json" || failed=1
     (( failed )) || run_pro_compat apply || failed=1
     (( failed )) || run_pro_compat verify --state "$stage/protected-state.json" || failed=1
     (( failed )) || install_awg_sysctl_guard || failed=1
@@ -1088,6 +1109,7 @@ PY_ARCH_LISTEN_CHANGED
         install_bittorrent_guard || failed=1
     fi
     (( failed )) || refresh_bittorrent_guard_rules || failed=1
+    (( failed )) || run_architecture prune-certs || failed=1
     if (( failed )); then
         if [[ "$choice" == 2 ]]; then
             msg_err 'Обновление архитектуры панели завершилось с ошибкой. Выполняется откат файлов и базы данных.'
@@ -1123,6 +1145,8 @@ PY_ARCH_LISTEN_CHANGED
                      /etc/systemd/system/lucx-log-policy.service /etc/systemd/system/lucx-log-policy.timer \
                      /etc/systemd/system/timers.target.wants/lucx-log-policy.timer \
                      /var/lib/lucx-ui-preinstall/architecture.json \
+                      /var/lib/lucx-ui-preinstall/retired-domains.json \
+                      /etc/nginx/conf.d/lucx-tproxy-map.conf \
                      /etc/logrotate.d/nginx /etc/systemd/journald.conf.d/99-lucx-ui-pro-logs.conf; do
             if [[ ! -e "$stage/rollback$entry" && ! -L "$stage/rollback$entry" ]]; then rm -f -- "$entry"; fi
         done
@@ -1166,6 +1190,9 @@ PY_ARCH_LISTEN_CHANGED
     printf '%s\n' "$PRO_COMPAT_REVISION" > "$PREINSTALL_STATE_DIR/compat-revision" || return 1
     printf '%s\n' "$script_commit" > "$PREINSTALL_STATE_DIR/pro-commit" || return 1
     setup_fail2ban || true
+    if [[ "$ONE_DOMAIN" == y ]]; then
+        msg_inf 'Общий домен: домен панели. Обновите подписки VLESS и ссылку Telegram WEB-proxy; прежние доменные ссылки больше не поддерживаются.'
+    fi
     if [[ "$choice" == 2 ]]; then
         msg_ok "Архитектура lucx актуализирована. Версия панели сохранена: $installed. Backup: /var/backups/x-ui."
     else
@@ -1759,32 +1786,11 @@ prompt_domain_a_record() {
 }
 choose_webproxy_domain() {
     [[ "${DEPLOY_TPROXY}" == "1" ]] || return 0
-    [[ -n "${IP4:-}" ]] || get_server_ip
-    local d p tproxy_autodomain="n"; webproxy_domain=""
-    choose_auto_domains tproxy_autodomain 'Создать auto-домен через sslip.io для Telegram WEB-proxy?' singular || return 1
-    if [[ "$tproxy_autodomain" == "y" ]]; then
-        # Reuse this component's certificate/name during a repeated install.
-        d="${1:-}"
-        if [[ "$d" == *.sslip.io && "$d" != "$domain" && "$d" != "$reality_domain" ]] && domain_a_ok "$d"; then
-            webproxy_domain="$d"
-        else
-            generate_auto_domain || return 1
-            webproxy_domain="$AUTO_DOMAIN_RESULT"
-        fi
-        msg_inf "Telegram WEB-proxy: ${webproxy_domain}"
-        return 0
-    fi
-    while true; do
-        printf -v p 'Домен для Telegram WEB-proxy (создайте A-запись на IP "%s"): ' "$IP4"
-        prompt_domain_a_record "$p" || return 1
-        d="$DOMAIN_INPUT"
-        if [[ "$d" == "$domain" || "$d" == "$reality_domain" ]]; then
-            ui_err "Домен WEB-proxy должен отличаться от домена панели и Reality."
-            continue
-        fi
-        webproxy_domain="$d"; break
-    done
-    echo
+    [[ -n "$domain" && "$domain" == "$reality_domain" ]] || {
+        msg_err 'Общая схема на домене панели ещё не настроена.'; return 1;
+    }
+    webproxy_domain="$domain"
+    msg_inf "Telegram WEB-proxy: общий домен ${domain}, TLS обслуживает nginx."
 }
 install_cover_generator() {
     local archive cached="${COVER_GENERATOR_DIR}/.package-sha256"
@@ -1899,11 +1905,11 @@ insert_tproxy_inbound() {
     fi
     cert="/root/cert/${webproxy_domain}/fullchain.pem"
     key="/root/cert/${webproxy_domain}/privkey.pem"
-    python3 - "$XUIDB" "$webproxy_domain" "$secret" "$cert" "$key" "$flag" <<'PY'
+    python3 - "$XUIDB" "$webproxy_domain" "$secret" "$cert" "$key" "$flag" "$domain" <<'PY'
 import json, sqlite3, sys
-db, hostname, secret, cert, key, flag = sys.argv[1:7]
+db, hostname, secret, cert, key, flag, main_domain = sys.argv[1:8]
 remark = ("%s web-proxy" % flag).strip()
-settings = {"clients": [], "port": 11443, "hostname": hostname, "secret": secret, "siteSource": "dir", "siteDir": "/var/www/html", "siteUpstream": "", "carrierMode": "https", "certFile": cert, "keyFile": key, "externalTLS": False, "behindCover": False, "routeThroughXray": False, "outboundTag": "", "routeXrayPort": 0}
+settings = {"clients": [], "port": 11443, "hostname": hostname, "secret": secret, "siteSource": "dir", "siteDir": "/var/www/html", "siteUpstream": "", "carrierMode": "https", "certFile": cert, "keyFile": key, "externalTLS": False, "behindCover": hostname == main_domain, "routeThroughXray": False, "outboundTag": "", "routeXrayPort": 0}
 stream = {"security": "none"}
 sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
 tag = "inbound-tproxy"
@@ -1953,6 +1959,10 @@ PY_TG_DOMAIN
 
 discover_panel_domains() {
     local stream=/etc/nginx/stream-enabled/stream.conf
+    if [[ -s "$PREINSTALL_STATE_DIR/domains" ]]; then
+        [[ -n "${domain:-}" ]] || domain=$(sed -n '1p' "$PREINSTALL_STATE_DIR/domains")
+        [[ -n "${reality_domain:-}" ]] || reality_domain=$(sed -n '2p' "$PREINSTALL_STATE_DIR/domains")
+    fi
     [[ -f "$stream" ]] || return 0
     [[ -n "${domain:-}" ]] || domain=$(awk '$2 == "www;" {print $1; exit}' "$stream")
     [[ -n "${reality_domain:-}" ]] || reality_domain=$(awk '$2 == "xray;" && $1 != "default" {print $1; exit}' "$stream")
@@ -1960,6 +1970,9 @@ discover_panel_domains() {
 
 patch_tproxy_nginx() {
     local action="$1" proxy_domain="$2"
+    discover_panel_domains
+    # Shared TLS/HTTP routes are reconciled after the native row exists/is removed.
+    [[ "$domain" != "$reality_domain" || "$proxy_domain" != "$domain" ]] || return 0
     local stream=/etc/nginx/stream-enabled/stream.conf redirect=/etc/nginx/sites-available/80.conf
     [[ -f "$stream" && -f "$redirect" ]] || { msg_err "Конфигурация nginx панели не найдена."; return 1; }
     local stream_bak redirect_bak
@@ -2127,6 +2140,9 @@ uninstall_tg_web_proxy() {
         fi
     fi
     remove_tproxy_inbound "$proxy_domain" || return 1
+    if [[ -n "$domain" && "$domain" == "$reality_domain" ]]; then
+        run_architecture reconcile && nginx -t && systemctl reload nginx || return 1
+    fi
     rm -rf /var/www/tproxy
     rm -f /root/.lucx-tg-web-proxy-info
     # Keep the domain certificate and its /root/cert links for future use.
@@ -2148,16 +2164,21 @@ install_tg_web_proxy() {
     for cmd in nginx certbot sqlite3 python3 curl jq openssl; do
         command -v "$cmd" >/dev/null 2>&1 || { msg_err "Не найдена обязательная команда: ${cmd}"; return 1; }
     done
+    discover_panel_domains
+    previous_domain=$(get_installed_tproxy_domain)
+    if [[ -n "$domain" && ( "$domain" != "$reality_domain" || ( -n "$previous_domain" && "$previous_domain" != "$domain" ) ) ]]; then
+        # Use the same backup, checks and rollback as ordinary architecture update.
+        update_compatibility architecture-only || return 1
+        domain=""; reality_domain=""
+        discover_panel_domains
+    fi
+    DEPLOY_TPROXY="1"
+    choose_webproxy_domain || return 1
     previous_domain=$(get_installed_tproxy_domain)
     if [[ -n "$previous_domain" ]] || [[ -d /var/www/tproxy ]]; then
         msg_inf "Telegram WEB-proxy уже установлен — выполняется чистая переустановка."
         uninstall_tg_web_proxy || return 1
     fi
-    get_server_ip
-    [[ "$IP4" =~ $IP4_REGEX ]] || { msg_err "Не удалось определить IPv4 сервера."; return 1; }
-    discover_panel_domains
-    DEPLOY_TPROXY="1"
-    choose_webproxy_domain "$previous_domain" || return 1
     ensure_tproxy_certificate "$webproxy_domain" || { msg_err "Не удалось получить сертификат для ${webproxy_domain}."; return 1; }
     install_tproxy_site || return 1
     patch_tproxy_nginx install "$webproxy_domain" || return 1
@@ -2165,6 +2186,9 @@ install_tg_web_proxy() {
         patch_tproxy_nginx uninstall "$webproxy_domain" 2>/dev/null || true
         rm -rf /var/www/tproxy /root/.lucx-tg-web-proxy-info
         return 1
+    fi
+    if [[ "$domain" == "$reality_domain" ]]; then
+        run_architecture reconcile && nginx -t && systemctl reload nginx || return 1
     fi
     install_shareonly_client_sync || {
         remove_tproxy_inbound "$webproxy_domain" 2>/dev/null || true
@@ -2301,6 +2325,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import subprocess
 import tarfile
@@ -2418,7 +2443,11 @@ def layout(root):
     result = {}
     manifest_file = root / STATE / 'architecture.json'
     known_files = json.loads(manifest_file.read_text()).get('nginx_files', {}) if manifest_file.is_file() else {}
+    unified = domains[0] == domains[1]
     for kind, domain in zip(('xhttp', 'reality'), domains):
+        if unified and kind == 'reality':
+            result[kind] = result['xhttp']
+            continue
         candidates = []
         for path in (root / 'etc/nginx/sites-available').iterdir():
             if not path.is_file():
@@ -2738,8 +2767,9 @@ def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_ho
                 if not previous.get(field):
                     raise RuntimeError('Managed REALITY ' + field + ' missing; no saved recovery value')
                 config[field] = copy.deepcopy(previous[field])
-        config['target'] = '127.0.0.1:9443'
-        config['xver'] = 0  # Cover 9443 accepts TLS without a PROXY prefix.
+        unified = domains and domains[0] == domains[1]
+        config['target'] = '127.0.0.1:7443' if unified else '127.0.0.1:9443'
+        config['xver'] = 1 if unified else 0
         config.update(show=False, minClientVer='', maxClientVer='', maxTimediff=0)
         for alias in ('minClient', 'maxClient'): config.pop(alias, None)
         if 'dest' in config: config['dest'] = config['target']
@@ -2796,12 +2826,13 @@ def patch_hosts(db, row, kind, saved, domains):
                 'security': 'tls' if kind == 'xhttp' else 'same',
                 'fingerprint': 'firefox' if kind == 'xhttp' else '',
                 'alpn': '["h2","http/1.1"]' if kind == 'xhttp' else '[]',
-                'sni': domains[0] if kind == 'xhttp' else '',
+                'sni': domains[0] if kind == 'xhttp' or (kind == 'reality' and domains[0] == domains[1]) else '',
                 'host_header': domains[0] if kind == 'xhttp' else '', 'path': '', 'cipher_suites': '',
                 'override_sni_from_address': 0, 'keep_sni_blank': 0,
                 'pinned_peer_cert_sha256': '[]', 'verify_peer_cert_by_name': '',
                 'allow_insecure': 0, 'ech_config_list': '', 'mux_params': '',
                 'sockopt_params': '', 'final_mask': '', 'vless_route': ''}
+    if domains[0] == domains[1]: defaults.update(snis='[]', sni_shared_random=0)
     columns = {r[1] for r in db.execute('PRAGMA table_info(hosts)')}
     defaults = {k:v for k,v in defaults.items() if k in columns}
     for identifier in identifiers:
@@ -2814,11 +2845,102 @@ def patch_hosts(db, row, kind, saved, domains):
     return identifiers
 
 
-def reconcile(root, remember=False, changes=None):
+def remove_cover_vhost(text, domain):
+    matches = [(a, c) for a, b, c, _ in block_spans(text)
+               if re.search(r'\bserver\s*$', text[a:b])
+               and domain in server_names(text[b+1:c])
+               and 'include /etc/nginx/snippets/includes.conf;' in text[b+1:c]
+               and f'/etc/letsencrypt/live/{domain}/fullchain.pem' in text[b+1:c]
+               and re.search(r'\blisten\s+[^;]*\b9443\b', text[b+1:c])]
+    if len(matches) != 1: raise RuntimeError('Ambiguous retired REALITY nginx vhost')
+    a, c = matches[0]
+    return text[:a] + text[c+1:]
+
+
+def telegram_plan(root, db, old_domains, domain, manifest):
+    info = root / 'root/.lucx-tg-web-proxy-info'
+    info_text = info.read_text() if info.is_file() else ''
+    known = re.search(r'(?m)^TG_WEB_PROXY_DOMAIN=(.+)$', info_text)
+    known_secret = re.search(r'(?m)^TG_WEB_PROXY_SECRET=(.+)$', info_text)
+    previous = manifest.get('telegram', {})
+    candidates = []
+    for row in rows(db, 'inbounds'):
+        if row['protocol'] != 'tproxy' or row['listen'] != '127.0.0.1' or row['port'] != 11443:
+            continue
+        settings = object_value(row['settings'])
+        hostname = settings.get('hostname')
+        signature = hashlib.sha256(str(settings.get('secret', '')).encode()).hexdigest()
+        owned = ((row['tag'] == 'inbound-tproxy' and hostname in old_domains)
+                 or (known and known_secret and hostname == known[1] and settings.get('secret') == known_secret[1])
+                 or (previous.get('id') == row['id'] and previous.get('secret_sha256') == signature))
+        if owned:
+            candidates.append((row, settings, signature))
+    if len(candidates) > 1: raise RuntimeError('Ambiguous managed Telegram WEB proxy')
+    if not candidates: return None, {}, None
+    row, settings, signature = candidates[0]
+    if settings.get('externalTLS'):
+        raise RuntimeError('Externally managed Telegram WEB proxy cannot be migrated automatically')
+    if settings.get('backend') not in (None, '', 'legacy'):
+        raise RuntimeError('Managed Telegram WEB proxy requires the legacy WEB backend for the shared nginx relay')
+    relay = 24000 + row['id'] * 4 + 2
+    if not 1 <= relay <= 65535: raise RuntimeError('Telegram relay port is outside the valid range')
+    settings.update(hostname=domain, behindCover=True, externalTLS=False,
+                    certFile=f'/root/cert/{domain}/fullchain.pem', keyFile=f'/root/cert/{domain}/privkey.pem')
+    planned_info = re.sub(r'(?m)^TG_WEB_PROXY_DOMAIN=.*$', 'TG_WEB_PROXY_DOMAIN=' + domain, info_text)
+    planned_info = re.sub(r'(?m)^TG_WEB_PROXY_SECRET=.*$', lambda _: 'TG_WEB_PROXY_SECRET=' + str(settings.get('secret', '')), planned_info)
+    return (row, settings), {'id': row['id'], 'secret_sha256': signature, 'relay_port': relay}, (info, planned_info)
+
+
+def patch_telegram_location(text, relay):
+    matches = [(a, c) for a, b, c, depth in block_spans(text)
+               if depth == 0 and re.fullmatch(r'\s*location\s+/\s*', text[a:b])]
+    if len(matches) != 1: raise RuntimeError('Missing/ambiguous managed website location')
+    a, c = matches[0]
+    old = text[a:c+1]
+    if 'LUCX PRO Telegram relay' not in old and not re.search(r'try_files\s+\$uri\s+\$uri/\s+=404;', old):
+        raise RuntimeError('Custom root website location requires manual migration')
+    location = '    location / { try_files $uri $uri/ =404; }'
+    if relay:
+        location = '''    location / {
+        # LUCX PRO Telegram relay
+        access_log off;
+        proxy_pass http://127.0.0.1:RELAY;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $lucx_tg_connection;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_intercept_errors off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        client_max_body_size 0;
+    }'''.replace('RELAY', str(relay))
+    return text[:a] + '\n' + location + text[c+1:]
+
+
+def patch_stream(text, old_domains, domain, reality_enabled):
+    pattern = r'(?m)^[ \t]*(' + '|'.join(map(re.escape, set(old_domains))) + r')\s+(?:xray|www|tproxy);[ \t]*\n?'
+    cleaned, count = re.subn(pattern, '', text)
+    if not count: raise RuntimeError('Managed nginx SNI routes not found')
+    matches = [b for a, b, c, depth in block_spans(cleaned)
+               if depth == 0 and re.search(r'map\s+\$ssl_preread_server_name\s+\$sni_name\s*$', cleaned[a:b])]
+    if len(matches) != 1: raise RuntimeError('Ambiguous nginx SNI map')
+    b = matches[0]
+    return cleaned[:b+1] + '\n    ' + domain + (' xray;' if reality_enabled else ' www;') + cleaned[b+1:]
+
+
+def reconcile(root, remember=False, changes=None, unify=False):
     if not (root / STATE / 'owned-by-lucx-ui-pro').is_file():
         raise RuntimeError('Installation is not owned by lucx-ui-pro')
     paths = layout(root)
-    domains = (root / STATE / 'domains').read_text().splitlines()[:2]
+    old_domains = (root / STATE / 'domains').read_text().splitlines()
+    domains = [old_domains[0]] * 2 if unify else old_domains[:2]
+    unified = domains[0] == domains[1]
     xhttp_path = location_path(root)
     permitted_hosts = [domains[0]]
     main_text = paths['xhttp'].read_text(encoding='utf-8')
@@ -2828,11 +2950,16 @@ def reconcile(root, remember=False, changes=None):
             permitted_hosts.extend(server_names(body))
     manifest_path = root / STATE / 'architecture.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
-    if manifest and manifest.get('domains') != domains:
+    if manifest and manifest.get('domains') != old_domains[:2]:
         raise RuntimeError('Managed domains differ from saved architecture identity')
     planned_files = {}
     listeners_changed = False
     for kind, port in (('xhttp', 7443), ('reality', 9443)):
+        if unified and kind == 'reality':
+            if paths[kind] != paths['xhttp']:
+                planned_files[paths[kind]] = remove_cover_vhost(paths[kind].read_text(encoding='utf-8'), old_domains[1])
+                listeners_changed = True
+            continue
         file = paths[kind]
         original = file.read_text(encoding='utf-8')
         planned_files[file] = patch_vhost(original, domains[0 if kind == 'xhttp' else 1], port)
@@ -2845,8 +2972,20 @@ def reconcile(root, remember=False, changes=None):
         db.execute('BEGIN IMMEDIATE')
         all_rows = rows(db, 'inbounds')
         live_hosts = rows(db, 'hosts')
+        tg_row, telegram, tg_info = telegram_plan(root, db, old_domains, domains[0], manifest) if unified else (None, {}, None)
+        if unified:
+            if telegram or 'LUCX PRO Telegram relay' in planned_files[snippet]:
+                planned_files[snippet] = patch_telegram_location(planned_files[snippet], telegram.get('relay_port') if tg_row and tg_row[0]['enable'] else None)
+            if telegram:
+                map_file = root / 'etc/nginx/conf.d/lucx-tproxy-map.conf'
+                marker = '# LUCX PRO Telegram connection map'
+                if map_file.exists() and marker not in map_file.read_text():
+                    raise RuntimeError('Unowned Telegram nginx map file')
+                planned_files[map_file] = marker + '\nmap $http_upgrade $lucx_tg_connection { default upgrade; "" close; }\n'
+            if tg_info and tg_info[1]: planned_files[tg_info[0]] = tg_info[1]
         new_manifest = {'format': 1, 'domains': domains, 'objects': {},
-                        'nginx_files': {kind: path.relative_to(root).as_posix() for kind, path in paths.items()}}
+                        'nginx_files': {kind: (paths['xhttp'] if unified else path).relative_to(root).as_posix() for kind, path in paths.items()}}
+        if unified: new_manifest['telegram'] = telegram
         for kind in ('xhttp', 'reality', 'hy2'):
             saved = manifest.get('objects', {}).get(kind)
             selection_file = root / STATE / 'hy2-ownership.json'
@@ -2858,7 +2997,7 @@ def reconcile(root, remember=False, changes=None):
                 entries = sorted(saved.get('hosts', []), key=lambda h:h['id']) if saved else []
                 host_ids = set(saved.get('managed_host_ids', [entries[0]['id']] if entries else [])) if saved else set()
                 host_link = any(h['id'] in host_ids and h['inbound_id'] == saved_id for h in live_hosts)
-                return [r for r in all_rows if proof(r, kind, domains, xhttp_path, saved_id,
+                return [r for r in all_rows if proof(r, kind, old_domains[:2], xhttp_path, saved_id,
                                                      saved['record'] if saved else None, host_link)]
             candidates = identify(saved)
             if kind == 'hy2' and selection.get('selected') and not saved:
@@ -2911,14 +3050,94 @@ def reconcile(root, remember=False, changes=None):
             if kind == 'hy2': new_manifest['objects'][kind]['architecture_port'] = patched['port']
         # File patches were fully parsed/validated before the first DB mutation.
         if not remember:
+            if unified:
+                stream = root / 'etc/nginx/stream-enabled/stream.conf'
+                owned_reality = new_manifest['objects'].get('reality', {})
+                enabled = owned_reality.get('present', True) and owned_reality.get('record', {}).get('enable', False)
+                retired_routes = old_domains[:2] + [name for name in old_domains[2:]
+                    if not any(r['protocol'] == 'tproxy' and object_value(r['settings']).get('hostname') == name
+                               and (not tg_row or r['id'] != tg_row[0]['id']) for r in all_rows)]
+                planned_files[stream] = patch_stream(stream.read_text(), retired_routes, domains[0], enabled)
+                redirect = root / 'etc/nginx/sites-available/80.conf'
+                if redirect.is_file():
+                    def redirect_names(match):
+                        names = [domains[0] if n in old_domains else n for n in match[1].split()]
+                        return 'server_name ' + ' '.join(dict.fromkeys(names)) + ';'
+                    planned_files[redirect] = re.sub(r'\bserver_name\s+([^;]+);', redirect_names, redirect.read_text())
+            if tg_row:
+                db.execute('UPDATE inbounds SET settings=? WHERE id=?', (json.dumps(tg_row[1], ensure_ascii=False), tg_row[0]['id']))
             for file, text in planned_files.items():
-                if text != file.read_text(encoding='utf-8'): atomic(file, text)
+                if not file.exists() or text != file.read_text(encoding='utf-8'): atomic(file, text, file == (tg_info or (None,))[0])
+            if unify:
+                retired = root / STATE / 'retired-domains.json'
+                previous_retired = json.loads(retired.read_text()) if retired.is_file() else []
+                atomic(retired, json.dumps(sorted(set(previous_retired + old_domains) - {domains[0]})) + '\n', True)
+                atomic(root / STATE / 'domains', '\n'.join(domains + ([domains[0]] if telegram else [])) + '\n', True)
         content = json.dumps(new_manifest, ensure_ascii=False, indent=2) + '\n'
         if not manifest_path.exists() or manifest_path.read_text() != content:
             atomic(manifest_path, content, True)
     print('Managed architecture: ' + ('identities saved.' if remember else 'XHTTP auto; trusted nginx header; Unix socket; internal listeners on loopback.'))
     if changes is not None:
         atomic(changes, json.dumps({'nginx_listeners_changed': listeners_changed}) + '\n', True)
+
+
+def prune_certificates(root):
+    state = root / STATE
+    retired = state / 'retired-domains.json'
+    if not retired.is_file(): return
+    if not (state / 'owned-by-lucx-ui-pro').is_file(): raise RuntimeError('Missing Pro ownership')
+    domains = (state / 'domains').read_text().splitlines()
+    if len(domains) < 2 or domains[0] != domains[1]: raise RuntimeError('Certificate cleanup requires unified architecture')
+    pending = json.loads(retired.read_text())
+    if not pending: return
+    ownership = state / 'new-certificates'
+    created = set(ownership.read_text().splitlines()) if ownership.is_file() else set()
+    if not set(pending) & created: return
+    # Read active configuration only; manual archives and rollback copies are never pruned.
+    with closing(sqlite3.connect((root / 'etc/x-ui/x-ui.db').as_uri() + '?mode=ro', uri=True)) as db:
+        values = [str(value) for table in ('inbounds', 'settings') for row in db.execute('SELECT * FROM ' + table) for value in row]
+    references = '\n'.join(values)
+    excluded = [root / 'etc/letsencrypt', *(root / 'root/cert' / domain for domain in pending)]
+    for directory in ('etc', 'opt', 'usr/local/etc', 'root'):
+        for file in (root / directory).rglob('*'):
+            if any(file == path or path in file.parents for path in excluded): continue
+            try:
+                if file.is_symlink(): references += '\n' + file.resolve().as_posix()
+            except (OSError, RuntimeError):
+                print('Retained retired Pro certificates: external certificate alias cannot be resolved safely')
+                return
+            if file.is_file() and file.suffix in ('.conf', '.cfg', '.cnf', '.ini', '.toml', '.properties', '.json', '.yaml', '.yml', '.env', '.sh', '.py', '.service', '.timer', ''):
+                try:
+                    with file.open('rb') as source:
+                        if b'\0' in source.read(4096): continue
+                    if file.stat().st_size > 16 * 1024 * 1024:
+                        print('Retained retired Pro certificates: external configuration is too large to verify safely')
+                        return
+                    references += '\n' + file.read_text(encoding='utf-8', errors='replace')
+                except OSError:
+                    print('Retained retired Pro certificates: external configuration cannot be read safely')
+                    return
+    retained = []
+    for domain in pending:
+        if domain in domains or not re.fullmatch(r'[A-Za-z0-9.-]+', domain) or domain in ('.', '..'):
+            raise RuntimeError('Invalid retired Pro certificate name')
+        prefixes = [f'/etc/letsencrypt/live/{domain}/', f'/etc/letsencrypt/archive/{domain}/', f'/root/cert/{domain}/']
+        if domain not in created or any(prefix.rstrip('/') in references.replace('\\/', '/') for prefix in prefixes):
+            retained.append(domain)
+            print('Retained referenced retired Pro certificate: ' + domain)
+            continue
+        paths = [root / f'etc/letsencrypt/{folder}/{domain}' for folder in ('live', 'archive')]
+        paths += [root / f'etc/letsencrypt/renewal/{domain}.conf', root / f'root/cert/{domain}']
+        # Never follow redirected certificate trees or directory aliases outside the workspace/root.
+        if any(p.parent.resolve() != p.parent.absolute() or p.is_symlink() for p in paths):
+            retained.append(domain)
+            print('Retained redirected retired Pro certificate: ' + domain)
+            continue
+        for path in paths:
+            if path.is_dir(): shutil.rmtree(path)
+            elif path.is_file(): path.unlink()
+        print('Removed unused retired Pro certificate: ' + domain)
+    atomic(retired, json.dumps(retained) + '\n', True)
 
 
 def wait_listeners(ports, xhttp_enabled, timeout=20):
@@ -2950,7 +3169,7 @@ def wait_hy2_listener(port, timeout=20):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('reconcile', 'remember', 'main-vhost', 'validate-live'))
+    parser.add_argument('action', choices=('reconcile', 'remember', 'unify-domain', 'prune-certs', 'main-vhost', 'validate-live'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--changes', type=Path)
     args = parser.parse_args()
@@ -2967,11 +3186,13 @@ def main():
                 return bool(row and row[0])
             reality_enabled, xhttp_enabled = enabled('reality'), enabled('xhttp')
             hy2_port = manifest['objects']['hy2']['record']['port'] if enabled('hy2') else None
-        wait_listeners((7443, 9443, *((8443,) if reality_enabled else ())), xhttp_enabled)
+        ports = (7443,) if manifest['domains'][0] == manifest['domains'][1] else (7443, 9443)
+        wait_listeners((*ports, *((8443,) if reality_enabled else ())), xhttp_enabled)
         if hy2_port is not None: wait_hy2_listener(hy2_port)
         print('Managed listeners validated: public 443 IPv4/IPv6; internal loopback only.')
     elif args.action == 'main-vhost': print(layout(root)['xhttp'])
-    else: reconcile(root, args.action == 'remember', args.changes)
+    elif args.action == 'prune-certs': prune_certificates(root)
+    else: reconcile(root, args.action == 'remember', args.changes, args.action == 'unify-domain')
 
 
 if __name__ == '__main__':
@@ -2993,7 +3214,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.10.29-332.1'
+REVISION = '2026.10.31-333.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -4794,8 +5015,8 @@ if [[ $pub =~ $IP4_REGEX ]]; then IP4="$pub"; fi
 choose_auto_domains() {
     local ans mapped tty=""
     local result_var="${1:-AUTODOMAIN}"
-    local question="${2:-Создать auto-домены через sslip.io для панели и REALITY?}"
-    local domain_form="${3:-plural}"
+    local question="${2:-Создать общий auto-домен через sslip.io для панели, REALITY и XHTTP?}"
+    local domain_form="${3:-singular}"
     [[ -t 0 && -r /dev/tty ]] && tty="/dev/tty"
     while true; do
         echo
@@ -4873,9 +5094,7 @@ validate_domains() {
     local d p
     if [[ "$AUTODOMAIN" == "y" ]]; then
         [[ -n "$domain" ]] || { generate_auto_domain || return 1; domain="$AUTO_DOMAIN_RESULT"; }
-        [[ -n "$reality_domain" ]] || { generate_auto_domain || return 1; reality_domain="$AUTO_DOMAIN_RESULT"; }
-        msg_inf "Домен панели: ${domain}"
-        msg_inf "Домен Reality: ${reality_domain}"
+        reality_domain="$domain"
     fi
     domain=$(echo "${domain}" | LC_ALL=C tr -d '[:space:]' | LC_ALL=C tr '[:upper:]' '[:lower:]')
     if [[ -n "$domain" ]] && ! domain_a_ok "$domain"; then
@@ -4891,34 +5110,12 @@ validate_domains() {
     SubDomain=$(echo "$domain"   | sed 's/^[^ ]* \|\..*//g')
     MainDomain=$(echo "$domain"  | sed 's/.*\.\([^.]*\..*\)$/\1/')
     [[ "${SubDomain}.${MainDomain}" != "${domain}" ]] && MainDomain=${domain}
-    reality_domain=$(echo "${reality_domain}" | LC_ALL=C tr -d '[:space:]' | LC_ALL=C tr '[:upper:]' '[:lower:]')
-    if [[ -n "$reality_domain" ]] && ! domain_a_ok "$reality_domain"; then
-        msg_err "A-запись ${reality_domain} не указывает на ${IP4}."
-        [[ "$AUTODOMAIN" != "y" ]] || return 1
-        reality_domain=""
-    fi
-    if [[ -z "$reality_domain" ]]; then
-        while true; do
-            printf -v p 'Домен для Reality (создайте A-запись на IP "%s"): ' "$IP4"
-            prompt_domain_a_record "$p" || return 1
-            d="$DOMAIN_INPUT"
-            if [[ "$d" == "$domain" ]]; then
-                ui_err "Домен панели и Reality должны отличаться."
-                continue
-            fi
-            reality_domain="$d"
-            break
-        done
-    fi
-    RealitySubDomain=$(echo "$reality_domain" | sed 's/^[^ ]* \|\..*//g')
-    RealityMainDomain=$(echo "$reality_domain" | sed 's/.*\.\([^.]*\..*\)$/\1/')
-    [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] && RealityMainDomain=${reality_domain}
-    if [[ "$domain" == "$reality_domain" ]]; then
-        msg_err "Panel domain and REALITY domain must be different! Got: ${domain}"
-        exit 1
-    fi
+    reality_domain="$domain"
+    RealitySubDomain="$SubDomain"
+    RealityMainDomain="$MainDomain"
+    msg_inf "Общий домен панели, REALITY и XHTTP: ${domain}"
 }
-# First interactive questions: panel + Reality (before AdGuard / DNS / extra-inbounds).
+# Ask for the common hostname before optional components.
 if [[ "${UPDATE_COMPAT}" != "y" && "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${BITTORRENT_GUARD_ONLY}" != "y" && "${BITTORRENT_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
     choose_auto_domains || exit 1
     validate_domains || exit 1
@@ -5051,8 +5248,9 @@ configure_nginx() {
     fi
 
     # SNI-based stream: reality → 8443, domain → 7443, webproxy → 11443
-    local tproxy_sni="" tproxy_up=""
-    if [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" ]]; then
+    local tproxy_sni="" tproxy_up="" www_sni=""
+    [[ "$domain" == "$reality_domain" ]] || www_sni="    ${domain}    www;"
+    if [[ "${DEPLOY_TPROXY}" == "1" && -n "${webproxy_domain}" && "$webproxy_domain" != "$domain" ]]; then
         tproxy_sni="    ${webproxy_domain}    tproxy;"
         tproxy_up="upstream tproxy { server 127.0.0.1:11443; }"
     fi
@@ -5060,7 +5258,7 @@ configure_nginx() {
 map \$ssl_preread_server_name \$sni_name {
     hostnames;
     ${reality_domain}    xray;
-    ${domain}            www;
+${www_sni}
 ${tproxy_sni}
     default              xray;
 }
@@ -5300,7 +5498,8 @@ server {
 }
 EOF
 
-    # Reality domain vhost (plain TLS at 9443, no proxy_protocol)
+    # Legacy installations keep their separate REALITY cover listener.
+    if [[ "$domain" != "$reality_domain" ]]; then
     cat > "/etc/nginx/sites-available/${reality_domain}" <<EOF
 server {
     server_tokens off;
@@ -5345,6 +5544,8 @@ server {
     include /etc/nginx/snippets/includes.conf;
 }
 EOF
+
+    fi
 
     # Activate configs
     if [[ -f "/etc/nginx/sites-available/${domain}" ]]; then
@@ -6929,6 +7130,7 @@ main() {
     insert_extra_inbound || return 1
     # Register optional HY2 and normalize the same owned fields as update.
     run_architecture reconcile || return 1
+    nginx -t && systemctl reload nginx || return 1
     restart_xui_wait || return 1
     # Final service state is authoritative after final configuration.
     if ! systemctl is-active --quiet x-ui; then
