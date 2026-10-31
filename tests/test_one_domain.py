@@ -115,6 +115,26 @@ IP4_REGEX='^[0-9.]+$'; DEPLOY_TPROXY=1
             self.assertEqual(arch.layout(root)['xhttp'],arch.layout(root)['reality'])
             self.assertNotIn('9443',(root/'etc/nginx/sites-available/main.example').read_text())
 
+    def test_migration_prints_actual_owned_telegram_link_only_if_enabled_and_present(self):
+        source=(Path(__file__).resolve().parents[1]/'lucx-ui-latest.sh').read_text(encoding='utf-8')
+        code=re.search(r"<<'PY_UPDATE_TELEGRAM_LINK'\n(.*?)\nPY_UPDATE_TELEGRAM_LINK",source,re.S)[1]
+        self.assertRegex(source,r'if \[\[ "\$ONE_DOMAIN" == y \]\]; then\n[^\n]*\n\s*python3[^\n]*PY_UPDATE_TELEGRAM_LINK')
+        for state in ('enabled','disabled','deleted','different-secret','no-telegram'):
+            with self.subTest(state=state),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);installation(root,True);arch.reconcile(root,unify=True)
+                manifest=root/arch.STATE/'architecture.json'
+                with connection(root/'etc/x-ui/x-ui.db') as db:
+                    if state=='disabled':db.execute('UPDATE inbounds SET enable=0 WHERE id=3')
+                    if state=='deleted':db.execute('DELETE FROM inbounds WHERE id=3')
+                    if state=='different-secret':
+                        settings=json.loads(records(root)[3]['settings']);settings['secret']='another'
+                        db.execute('UPDATE inbounds SET settings=? WHERE id=3',(json.dumps(settings),))
+                if state=='no-telegram':
+                    saved=json.loads(manifest.read_text());saved['telegram']={};manifest.write_text(json.dumps(saved))
+                output=io.StringIO()
+                with patch.object(sys,'argv',['link',str(root/'etc/x-ui/x-ui.db'),str(manifest)]),contextlib.redirect_stdout(output):exec(compile(code,'migration-link','exec'),{})
+                self.assertEqual(output.getvalue(),'Telegram WEB-proxy: https://t.me/webproxy?server=main.example&secret=preserved\n' if state=='enabled' else '')
+
     def test_unification_preserves_data_and_header_contract(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);installation(root, True)

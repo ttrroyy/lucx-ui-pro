@@ -931,6 +931,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import tarfile
@@ -939,7 +940,10 @@ import time
 
 STATE = 'var/lib/lucx-ui-preinstall'
 SOCKET = '/dev/shm/uds2023.sock'
-TAGS = {'xhttp': 'inbound-/dev/shm/uds2023.sock,0666:0|', 'reality': 'inbound-8443'}
+XHTTP_LISTEN = '127.0.0.1'
+XHTTP_PORT = 10080
+LEGACY_XHTTP_TAG = 'inbound-/dev/shm/uds2023.sock,0666:0|'
+TAGS = {'xhttp': 'inbound-10080', 'reality': 'inbound-8443'}
 LEGACY_SOCKOPT = {
     'acceptProxyProtocol': False, 'tcpFastOpen': True, 'mark': 0,
     'tproxy': 'off', 'tcpMptcp': True, 'tcpNoDelay': True,
@@ -1148,15 +1152,29 @@ def patch_vhost(text, domain, port):
     return text[:b+1] + body + text[c:]
 
 
-def patch_location(text, path):
+def xhttp_backend(body):
+    body = re.sub(r'(?m)#.*$', '', body)
+    return re.search(r'\bgrpc_pass\s+(?:grpc://)?(?:unix:' + re.escape(SOCKET) +
+                     '|' + re.escape(XHTTP_LISTEN) + ':' + str(XHTTP_PORT) + r')\s*;', body)
+
+
+def check_xhttp_port():
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind((XHTTP_LISTEN, XHTTP_PORT))
+    except OSError as error:
+        raise RuntimeError('XHTTP loopback TCP port is occupied; migration refused') from error
+
+
+def patch_location(text, path, migrate=True):
     if not re.fullmatch(r'/[A-Za-z0-9_/-]+', path) or '//' in path:
         raise RuntimeError('Unsupported managed XHTTP path')
     candidates = []
     for a, b, c, depth in block_spans(text):
         header = re.sub(r'(?m)#.*$', '', text[a:b]).strip()
-        if header.startswith('location ') and SOCKET in text[b+1:c]:
+        if header.startswith('location ') and xhttp_backend(text[b+1:c]):
             if not re.fullmatch(r'location\s+(?:\^~\s+)?' + re.escape(path.rstrip('/')) + r'/?', header):
-                raise RuntimeError('XHTTP socket is referenced by an unrecognized location')
+                raise RuntimeError('XHTTP backend is referenced by an unrecognized location')
             candidates.append((a, b, c))
     if len(candidates) != 1: raise RuntimeError('Missing/duplicate managed XHTTP nginx location')
     a, b, c = candidates[0]
@@ -1164,11 +1182,12 @@ def patch_location(text, path):
     directives = {
         'client_max_body_size': '0', 'client_body_timeout': '1h',
         'grpc_read_timeout': '1h', 'grpc_send_timeout': '1h',
-        'grpc_pass': 'unix:' + SOCKET,
+        'grpc_pass': 'grpc://' + XHTTP_LISTEN + ':' + str(XHTTP_PORT),
         'grpc_set_header Connection': '""', 'grpc_set_header Host': '$host',
         'grpc_set_header X-Real-IP': '$remote_addr',
         'grpc_set_header X-Forwarded-For': '$remote_addr',
     }
+    if not migrate: directives.pop('grpc_pass')
     def replace_top(body, pattern, replacement):
         nested = [(b, c) for _, b, c, depth in block_spans(body) if depth == 0]
         count = 0
@@ -1242,8 +1261,10 @@ def proof(row, kind, domains, xhttp_path, saved_id=None, saved_record=None, host
             transport = (stream.get('network') == 'xhttp'
                          and (config.get('path', '').rstrip('/') == xhttp_path.rstrip('/')
                               or config.get('host') == domains[0]))
-            return ((row['tag'] == TAGS[kind] or row['id'] == saved_id or transport)
-                    and (row.get('listen') or '').split(',')[0] == SOCKET)
+            legacy = (row.get('listen') or '').split(',')[0] == SOCKET
+            tcp = row.get('listen') == XHTTP_LISTEN and int(row['port']) == XHTTP_PORT
+            return ((row['tag'] in (TAGS[kind], LEGACY_XHTTP_TAG) or row['id'] == saved_id or (legacy and transport))
+                    and (legacy or tcp))
         config = object_value(stream.get('realitySettings'))
         transport = stream.get('security') == 'reality' and stream.get('network') == 'tcp'
         return ((row['tag'] == TAGS[kind] or row['id'] == saved_id or transport)
@@ -1258,7 +1279,7 @@ def location_path(root):
     text = (root / 'etc/nginx/snippets/includes.conf').read_text(encoding='utf-8')
     paths = []
     for a, b, c, _ in block_spans(text):
-        if SOCKET in text[b+1:c]:
+        if xhttp_backend(text[b+1:c]):
             header = re.sub(r'(?m)#.*$', '', text[a:b]).strip()
             match = re.fullmatch(r'location\s+(?:\^~\s+)?(/[A-Za-z0-9_/-]+)', header)
             if match: paths.append(match[1].rstrip('/'))
@@ -1391,10 +1412,10 @@ def canonical(row, kind, xhttp_path=None, saved=None, domains=None, permitted_ho
         tcp['header'] = reset_fields(tcp.get('header'), {'type', 'request', 'response'}, {'type': 'none'})
         stream['tcpSettings'] = tcp
     elif kind == 'xhttp':
-        row['listen'] = SOCKET + ',0666'; row['port'] = 0
+        row['listen'] = XHTTP_LISTEN; row['port'] = XHTTP_PORT
         stream['network'] = 'xhttp'; stream['security'] = 'none'
         stream['xhttpSettings'] = reset_xhttp(stream.get('xhttpSettings'), xhttp_path, domains[0])
-        # nginx overwrites X-Forwarded-For before forwarding to this Unix socket.
+        # Only the loopback nginx frontend supplies this overwritten header.
         sockopt['trustedXForwardedFor'] = ['X-Forwarded-For']
         stream['sockopt'] = sockopt
     row['settings'] = json.dumps(settings, ensure_ascii=False)
@@ -1571,7 +1592,7 @@ def reconcile(root, remember=False, changes=None, unify=False):
         listen_lines = lambda text: re.findall(r'(?m)^\s*listen\s+[^;]*;', text)
         listeners_changed |= listen_lines(original) != listen_lines(planned_files[file])
     snippet = root / 'etc/nginx/snippets/includes.conf'
-    planned_files[snippet] = patch_location(snippet.read_text(encoding='utf-8'), xhttp_path)
+    planned_files[snippet] = snippet.read_text(encoding='utf-8')
     with closing(sqlite3.connect(root / 'etc/x-ui/x-ui.db', timeout=30)) as db, db:
         db.row_factory = sqlite3.Row
         db.execute('BEGIN IMMEDIATE')
@@ -1632,6 +1653,15 @@ def reconcile(root, remember=False, changes=None, unify=False):
                 print(f'Skipped absent/unidentified managed {kind}; nothing created')
                 continue
             row = candidates[0]
+            if kind == 'xhttp' and not remember:
+                for other in all_rows:
+                    if (other['id'] != row['id'] and other['enable'] and int(other.get('port') or 0) == XHTTP_PORT
+                            and other['listen'] in ('', '0.0.0.0', '::', '[::]', XHTTP_LISTEN)
+                            and other['protocol'] in ('vless', 'vmess', 'trojan', 'shadowsocks', 'http', 'mixed', 'socks')
+                            and object_value(other['stream_settings']).get('network') not in ('kcp', 'quic', 'hysteria', 'hysteria2')):
+                        raise RuntimeError('XHTTP loopback TCP port is used by another enabled inbound')
+                if root == Path('/') and not (row['enable'] and row['listen'] == XHTTP_LISTEN and int(row['port']) == XHTTP_PORT):
+                    check_xhttp_port()
             if not saved:
                 saved = snapshot(db, row)
                 saved['managed_host_ids'] = [h['id'] for h in sorted(saved['hosts'], key=lambda h:h['id'])[:1]]
@@ -1653,7 +1683,9 @@ def reconcile(root, remember=False, changes=None, unify=False):
             new_manifest['objects'][kind].update(managed_host_ids=host_ids, present=True)
             if remember: new_manifest['objects'][kind]['protect_for_update'] = True
             if kind == 'hy2': new_manifest['objects'][kind]['architecture_port'] = patched['port']
-        # File patches were fully parsed/validated before the first DB mutation.
+        # Do not redirect a deleted/unidentified inbound's route to a new private service.
+        present = new_manifest['objects'].get('xhttp', {}).get('present', False)
+        planned_files[snippet] = patch_location(planned_files[snippet], xhttp_path, migrate=present)
         if not remember:
             if unified:
                 stream = root / 'etc/nginx/stream-enabled/stream.conf'
@@ -1681,7 +1713,7 @@ def reconcile(root, remember=False, changes=None, unify=False):
         content = json.dumps(new_manifest, ensure_ascii=False, indent=2) + '\n'
         if not manifest_path.exists() or manifest_path.read_text() != content:
             atomic(manifest_path, content, True)
-    print('Managed architecture: ' + ('identities saved.' if remember else 'XHTTP auto; trusted nginx header; Unix socket; internal listeners on loopback.'))
+    print('Managed architecture: ' + ('identities saved.' if remember else 'XHTTP auto; trusted nginx header; TCP loopback; internal listeners on loopback.'))
     if changes is not None:
         atomic(changes, json.dumps({'nginx_listeners_changed': listeners_changed}) + '\n', True)
 
@@ -1754,8 +1786,8 @@ def wait_listeners(ports, xhttp_enabled, timeout=20):
         error = next((f'Managed loopback listener {port} is missing' for port in ports
                       if '127.0.0.1:' + str(port) not in addresses), None)
         # Other user listeners are outside our DB/vhost contract.
-        if not error and xhttp_enabled and SOCKET not in subprocess.check_output(['ss', '-H', '-lx'], text=True).split():
-            error = 'Managed XHTTP Unix socket is not listening'
+        if not error and xhttp_enabled and XHTTP_LISTEN + ':' + str(XHTTP_PORT) not in addresses:
+            error = 'Managed XHTTP loopback TCP listener is missing'
         if not error and not {'0.0.0.0:443', '[::]:443'}.issubset(addresses):
             error = 'Public nginx SNI listeners are missing'
         if not error: return
@@ -1774,12 +1806,13 @@ def wait_hy2_listener(port, timeout=20):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('reconcile', 'remember', 'unify-domain', 'prune-certs', 'main-vhost', 'validate-live'))
+    parser.add_argument('action', choices=('reconcile', 'remember', 'unify-domain', 'prune-certs', 'main-vhost', 'validate-live', 'check-xhttp-port'))
     parser.add_argument('--root', type=Path, default=Path('/'))
     parser.add_argument('--changes', type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.action == 'validate-live':
+    if args.action == 'check-xhttp-port': check_xhttp_port()
+    elif args.action == 'validate-live':
         if root != Path('/'): raise RuntimeError('Live validation requires the actual system root')
         # Check only our listeners; other inbound ports/routing are not a contract.
         manifest = json.loads((root / STATE / 'architecture.json').read_text())
@@ -1819,7 +1852,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.10.31-333.1'
+REVISION = '2026.10.31-333.2'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3

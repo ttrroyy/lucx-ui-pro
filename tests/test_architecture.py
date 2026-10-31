@@ -243,7 +243,7 @@ class Architecture(unittest.TestCase):
     def test_async_xray_startup_waits_and_ignores_other_user_listeners(self):
         addresses=['127.0.0.1:7443','127.0.0.1:9443','0.0.0.0:443','[::]:443','127.0.0.2:7443']
         output=lambda items:'\n'.join('LISTEN 0 128 '+item+' *:*' for item in items)
-        with patch.object(arch.subprocess,'check_output',side_effect=[output(addresses),output(addresses+['127.0.0.1:8443']),arch.SOCKET]),patch.object(arch.time,'sleep') as sleep:
+        with patch.object(arch.subprocess,'check_output',side_effect=[output(addresses),output(addresses+['127.0.0.1:8443','127.0.0.1:10080'])]),patch.object(arch.time,'sleep') as sleep:
             arch.wait_listeners((7443,9443,8443),True)
             sleep.assert_called_once_with(0.5)
 
@@ -265,7 +265,7 @@ class Architecture(unittest.TestCase):
             for key in before[1]:
                 if key not in ('listen','settings','stream_settings'): self.assertEqual(before[1][key], after[1][key])
             for key in before[2]:
-                if key not in ('listen','settings','stream_settings'): self.assertEqual(before[2][key], after[2][key])
+                if key not in ('listen','port','settings','stream_settings'): self.assertEqual(before[2][key], after[2][key])
             stream = json.loads(after[2]['stream_settings'])
             self.assertEqual(stream['xhttpSettings']['mode'],'auto')
             self.assertEqual(stream['sockopt'],{'futureSockopt':42,'trustedXForwardedFor':['X-Forwarded-For']})
@@ -342,8 +342,8 @@ class Architecture(unittest.TestCase):
             after=records(root)
             self.assertEqual(set(after),{1,2,99})
             self.assertEqual(after[1]['port'],8443)
-            self.assertEqual(after[2]['port'],0)
-            self.assertEqual(after[2]['listen'],arch.SOCKET+',0666')
+            self.assertEqual(after[2]['port'],arch.XHTTP_PORT)
+            self.assertEqual(after[2]['listen'],arch.XHTTP_LISTEN)
 
     def test_saved_host_links_identify_edited_transport_and_missing_reality(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -358,7 +358,7 @@ class Architecture(unittest.TestCase):
             after=records(root)
             self.assertEqual(set(after),{2,99})
             self.assertEqual(after[2]['tag'],'user-xhttp')
-            self.assertEqual(after[2]['listen'],arch.SOCKET+',0666')
+            self.assertEqual(after[2]['listen'],arch.XHTTP_LISTEN)
             stream=json.loads(after[2]['stream_settings'])
             self.assertEqual(stream['network'],'xhttp')
             self.assertEqual(stream['xhttpSettings']['path'],'/secret')
@@ -378,7 +378,7 @@ class Architecture(unittest.TestCase):
             after=records(root)
             self.assertEqual(set(after),{1,2,99})
             self.assertEqual(after[2]['tag'],'renamed')
-            self.assertEqual(after[2]['listen'],arch.SOCKET+',0666')
+            self.assertEqual(after[2]['listen'],arch.XHTTP_LISTEN)
 
     def test_heavily_edited_reality_owned_fields_and_cleared_keys_recovered(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -456,7 +456,7 @@ class Architecture(unittest.TestCase):
                 db.execute('UPDATE inbounds SET stream_settings=?,port=5000 WHERE id=2',(json.dumps(stream),))
             arch.reconcile(root)
             row=records(root)[2];stream=json.loads(row['stream_settings'])
-            self.assertEqual(row['port'],0)
+            self.assertEqual(row['port'],arch.XHTTP_PORT)
             self.assertEqual(stream['xhttpSettings']['path'],'/secret')
             self.assertEqual(stream['xhttpSettings']['mode'],'auto')
             self.assertEqual(stream['nativeAddedAfterUpdate'],{'nested':[1,2,3]})
