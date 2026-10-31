@@ -406,8 +406,8 @@ cmd_backup() {
                rkn-guard-list-update.timer rkn-guard-self-update.timer \
                vibehost-guard.service vibehost-guard-tick.timer; do
         enabled=0; active=0
-        systemctl is-enabled --quiet "$svc" && enabled=1 || true
-        systemctl is-active --quiet "$svc" && active=1 || true
+        systemctl is-enabled --quiet "$svc" 2>/dev/null && enabled=1 || true
+        systemctl is-active --quiet "$svc" 2>/dev/null && active=1 || true
         [[ "$svc" == x-ui ]] && active="$BACKUP_WAS_ACTIVE"
         printf '%s %s %s\n' "$svc" "$enabled" "$active" >> "${staging}/services-state"
     done
@@ -1852,7 +1852,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.10.31-333.2'
+REVISION = '2026.11.01-333.3'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3

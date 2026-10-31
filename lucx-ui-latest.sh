@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.10.31-333.2"
+PRO_COMPAT_REVISION="2026.11.01-333.3"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -1009,7 +1009,8 @@ PY_UPDATE_CERT_FILES
     mkdir "$stage/rollback" || { (( was_active == 0 )) || systemctl start x-ui; return 1; }
     local entry
     for entry in "${snapshot_entries[@]}"; do
-        [[ ! -e "$entry" ]] || cp -a --parents "$entry" "$stage/rollback/" || {
+        # coreutils 9.1–9.3 fail to preserve absolute --parents paths.
+        [[ ! -e "$entry" ]] || (cd / && cp -a --parents "${entry#/}" "$stage/rollback/") || {
             (( was_active == 0 )) || systemctl start x-ui
             return 1
         }
@@ -3263,7 +3264,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.10.31-333.2'
+REVISION = '2026.11.01-333.3'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -4325,7 +4326,7 @@ bittorrent_guard_backup() {
                 /etc/systemd/system/vibehost-guard-tick.service /etc/systemd/system/vibehost-guard-tick.timer \
                 "${PREINSTALL_STATE_DIR}/firewall/iptables.v4" "${PREINSTALL_STATE_DIR}/firewall/iptables.v6"; do
         [[ -e "$path" ]] || continue
-        cp -a --parents "$path" "$BITTORRENT_GUARD_BACKUP/" || return 1
+        (cd / && cp -a --parents "${path#/}" "$BITTORRENT_GUARD_BACKUP/") || return 1
     done
     msg_inf "Резервная копия защиты и firewall: $BITTORRENT_GUARD_BACKUP"
 }
@@ -4387,7 +4388,11 @@ install_bittorrent_guard() {
         return 1
     fi
     rm -f "$installer"
-    msg_ok 'Защита BitTorrent установлена: автозапуск и проверка правил каждые 5 минут; локального срока отключения нет.'
+    if (( existing )); then
+        msg_ok 'Защита BitTorrent обновлена: автозапуск и проверка правил каждые 5 минут; локального срока отключения нет.'
+    else
+        msg_ok 'Защита BitTorrent установлена: автозапуск и проверка правил каждые 5 минут; локального срока отключения нет.'
+    fi
 }
 
 refresh_bittorrent_guard_rules() {

@@ -1,8 +1,44 @@
-import json,os,shutil,sqlite3,subprocess,tempfile,unittest
+import json,os,re,shlex,shutil,sqlite3,subprocess,tempfile,unittest
 from pathlib import Path
 from test_update_compat import compat,database,repo
 
 class UpdateTransaction(unittest.TestCase):
+    @unittest.skipUnless(os.name=='posix' and shutil.which('bash'),'Linux snapshot copy')
+    def test_snapshot_copies_use_relative_paths_and_keep_metadata(self):
+        text=(repo/'lucx-ui-latest.sh').read_text(encoding='utf-8')
+        copies=re.findall(r'\(cd / && cp -a --parents .*?\)',text)
+        self.assertEqual(len(copies),2)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'source with spaces';source.mkdir(mode=0o750)
+            (source/'data').write_text('rollback fixture');(source/'data').chmod(0o640)
+            (source/'link').symlink_to('data');(source/'dangling').symlink_to('missing')
+            for index,command in enumerate(copies):
+                stage=root/str(index);stage.mkdir();(stage/'rollback').mkdir()
+                env=dict(os.environ,entry=str(source),path=str(source),stage=str(stage),
+                         BITTORRENT_GUARD_BACKUP=str(stage/'rollback'))
+                result=subprocess.run(['bash','-c',command+' && test "$PWD" = '+shlex.quote(str(root))],cwd=root,env=env,capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                saved=stage/'rollback'/str(source).lstrip('/')
+                self.assertEqual((saved/'data').read_text(),'rollback fixture')
+                self.assertEqual(saved.stat().st_mode & 0o777,0o750)
+                self.assertEqual((saved/'data').stat().st_mode & 0o777,0o640)
+                self.assertEqual(os.readlink(saved/'link'),'data')
+                self.assertEqual(os.readlink(saved/'dangling'),'missing')
+                failed=subprocess.run(['bash','-c','cp(){ return 29; }; '+command],cwd=root,env=env,capture_output=True,text=True)
+                self.assertEqual(failed.returncode,29)
+
+    @unittest.skipUnless(os.name=='posix' and shutil.which('bash'),'Linux service probes')
+    def test_missing_optional_backup_services_are_recorded_quietly(self):
+        text=(repo/'assets/backup/lucx-ui-backup.sh').read_text(encoding='utf-8')
+        start=text.index('    for svc in x-ui nginx')
+        loop=text[start:text.index('\n    done',start)+len('\n    done')]
+        with tempfile.TemporaryDirectory() as folder:
+            script='staging='+shlex.quote(folder)+'\nBACKUP_WAS_ACTIVE=1\nsystemctl(){ echo "unit not found" >&2; return 1; };\n'+loop
+            result=subprocess.run(['bash','-c',script],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(result.stderr,'')
+            states=(Path(folder)/'services-state').read_text().splitlines()
+            self.assertIn('AdGuardHome 0 0',states);self.assertIn('x-ui 0 1',states)
+
     def test_only_configured_sidecars_return_and_new_files_win(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)

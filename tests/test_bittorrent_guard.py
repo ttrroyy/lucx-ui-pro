@@ -98,6 +98,15 @@ create-guard
         self.assertEqual(argc,'0');self.assertEqual(conf,'fixture-registration\n')
         self.assertTrue(native);self.assertTrue(state['guard'])
         self.assertIn('enable --now vibehost-guard.service vibehost-guard-tick.timer',calls)
+        self.assertIn('Защита BitTorrent обновлена:',result.stdout)
+        self.assertNotIn('Защита BitTorrent установлена:',result.stdout)
+
+    def test_fresh_install_reports_installation(self):
+        result,state,_,native,_,argc=self.invoke('install_bittorrent_guard')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(argc,'0');self.assertTrue(native);self.assertTrue(state['guard'])
+        self.assertIn('Защита BitTorrent установлена:',result.stdout)
+        self.assertNotIn('Защита BitTorrent обновлена:',result.stdout)
 
     def test_uninstall_is_idempotent_and_removes_duplicate_owned_hooks(self):
         result,state,calls,native,conf,_=self.invoke('uninstall_bittorrent_guard && uninstall_bittorrent_guard',installed=True)
