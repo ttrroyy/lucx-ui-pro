@@ -9,7 +9,7 @@ class UpdateTransaction(unittest.TestCase):
         copies=re.findall(r'\(cd / && cp -a --parents .*?\)',text)
         self.assertEqual(len(copies),2)
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);source=root/'source with spaces';source.mkdir(mode=0o750)
+            root=Path(folder);source=root/'source with spaces';source.mkdir();source.chmod(0o750)
             (source/'data').write_text('rollback fixture');(source/'data').chmod(0o640)
             (source/'link').symlink_to('data');(source/'dangling').symlink_to('missing')
             for index,command in enumerate(copies):

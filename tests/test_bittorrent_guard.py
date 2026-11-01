@@ -66,7 +66,7 @@ class BitTorrentGuard(unittest.TestCase):
             if installed:
                 native.parent.mkdir(parents=True);native.write_text('#!/bin/sh\nexit 0\n');native.chmod(0o755)
                 conf.parent.mkdir(parents=True);conf.write_text('fixture-registration\n');conf.chmod(0o600)
-                for name in ('vibehost-guard.service','vibehost-guard-tick.service','vibehost-guard-tick.timer'):
+                for name in ('vibehost-guard.service','vibehost-guard-dpid.service','vibehost-guard-tick.service','vibehost-guard-tick.timer'):
                     (root/'etc/systemd/system'/name).touch()
             provider='''#!/bin/sh
 printf '%s' "$#" > "$MOCK_DIR/provider-argc"
@@ -86,6 +86,9 @@ create-guard
             env=dict(os.environ,MOCK_DIR=str(root),PATH=str(root/'bin')+os.pathsep+os.environ['PATH'],MOCK_DOWNLOAD_FAIL=str(int(download_fails)),MOCK_SERVICE_FAIL=str(int(service_fails)))
             result=subprocess.run([BASH,str(path)],env=env,capture_output=True,text=True,timeout=15)
             state=json.loads((root/'state.json').read_text())
+            state['dpid_unit']=(root/'etc/systemd/system/vibehost-guard-dpid.service').exists()
+            state['guard_library_mode']=native.parent.stat().st_mode & 0o777 if native.parent.exists() else None
+            state['dpid_backups']=len(list((root/'var/backups').glob('**/vibehost-guard-dpid.service')))
             state['snapshots']=[p.read_text() for p in sorted(snapshots.iterdir())]
             calls=(root/'calls').read_text() if (root/'calls').exists() else ''
             self.assertNotRegex(calls,r'systemctl (?:stop|restart|reload|disable) (?:x-ui|nginx)')
@@ -97,6 +100,7 @@ create-guard
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(argc,'0');self.assertEqual(conf,'fixture-registration\n')
         self.assertTrue(native);self.assertTrue(state['guard'])
+        self.assertEqual(state['guard_library_mode'],0o755)
         self.assertIn('enable --now vibehost-guard.service vibehost-guard-tick.timer',calls)
         self.assertIn('Защита BitTorrent обновлена:',result.stdout)
         self.assertNotIn('Защита BitTorrent установлена:',result.stdout)
@@ -113,6 +117,9 @@ create-guard
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertFalse(state['guard']);self.assertFalse(any(state['hooks'].values()))
         self.assertFalse(native);self.assertIsNone(conf)
+        self.assertFalse(state['dpid_unit']);self.assertGreater(state['dpid_backups'],0)
+        self.assertIn('systemctl stop vibehost-guard-dpid.service',calls)
+        self.assertIn('systemctl disable vibehost-guard-dpid.service',calls)
         for snapshot in state['snapshots']:
             self.assertNotIn('VH_GUARD',snapshot);self.assertIn('-A INPUT -j RKN',snapshot)
 
@@ -159,6 +166,8 @@ create-guard
             self.assertLess(dispatch,ownership)
         backup=(REPO/'assets/backup/lucx-ui-backup.sh').read_text(encoding='utf-8')
         self.assertIn('/usr/local/lib/vibehost-guard',backup);self.assertIn('/etc/vibehost-guard',backup)
+        self.assertIn('restore_unit_state vibehost-guard-dpid.service',backup)
+        self.assertIn('vibehost-guard.service vibehost-guard-dpid.service vibehost-guard-tick.service',backup)
         self.assertGreater(backup.index('Failed to restore BitTorrent guard rules'),backup.index('UFW state and runtime rules restored'))
 
 

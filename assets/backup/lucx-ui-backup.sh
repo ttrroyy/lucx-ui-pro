@@ -268,7 +268,7 @@ BACKUP_PATHS=(
     /root/.lucx-adguard-info
 )
 SYSTEMD_UNITS=(
-    vibehost-guard.service vibehost-guard-tick.service vibehost-guard-tick.timer
+    vibehost-guard.service vibehost-guard-dpid.service vibehost-guard-tick.service vibehost-guard-tick.timer
     x-ui.service mtr-backend.service lucx-clash-sub.service AdGuardHome.service fail2ban.service
     lucx-apply-qdisc.service
     lucx-qdisc-sync.service lucx-qdisc-sync.path
@@ -404,7 +404,7 @@ cmd_backup() {
                lucx-awg-sysctl-guard.path antiscan-ipset-restore.service \
                antiscan-move-rules.service antiscan-aggregate.timer \
                rkn-guard-list-update.timer rkn-guard-self-update.timer \
-               vibehost-guard.service vibehost-guard-tick.timer; do
+               vibehost-guard.service vibehost-guard-dpid.service vibehost-guard-tick.timer; do
         enabled=0; active=0
         systemctl is-enabled --quiet "$svc" 2>/dev/null && enabled=1 || true
         systemctl is-active --quiet "$svc" 2>/dev/null && active=1 || true
@@ -1852,7 +1852,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.01-333.3'
+REVISION = '2026.11.01-335.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -2849,7 +2849,7 @@ PY_META_AWG
     # shellcheck disable=SC2086
     DEBIAN_FRONTEND=noninteractive apt-get install -y ${PACKAGES}
 
-    systemctl stop vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard.service 2>/dev/null || true
+    systemctl stop vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard-dpid.service vibehost-guard.service 2>/dev/null || true
 
     # ── stop running services ─────────────────────────────────────────────
     blue "==> Stopping services..."
@@ -2890,6 +2890,8 @@ PY_META_AWG
             parent=$(dirname "$path")
             [[ -d "$parent" ]] || install -d -m 0755 "$parent"
             if [[ -d "$src" && ! -L "$src" ]]; then
+                # Guard state must match the archive, including an older pre-DPI version.
+                case "$path" in /usr/local/lib/vibehost-guard|/etc/vibehost-guard) rm -rf -- "$path" ;; esac
                 [[ -d "$path" ]] || install -d -m 0755 "$path"
                 cp -a "$src/." "$path/"
                 chown --reference="$src" "$path"
@@ -2898,6 +2900,15 @@ PY_META_AWG
                 cp -a --remove-destination "$src" "$path"
             fi
         done
+        if [[ -f "${staging}/files/usr/local/lib/vibehost-guard/guard.sh" &&
+              ! -f "${staging}/files/etc/vibehost-guard/dpi.mode" ]]; then
+            rm -f /etc/vibehost-guard/dpi.mode
+        fi
+        if [[ -f "${staging}/files/usr/local/lib/vibehost-guard/guard.sh" &&
+              ! -f "${staging}/files/etc/systemd/system/vibehost-guard-dpid.service" ]]; then
+            systemctl disable vibehost-guard-dpid.service 2>/dev/null || true
+            rm -f /etc/systemd/system/vibehost-guard-dpid.service
+        fi
         # Unit files are collected separately from BACKUP_PATHS.
         [[ -d /etc/systemd/system ]] || install -d -m 0755 /etc/systemd/system
         for unit in "${SYSTEMD_UNITS[@]}"; do
@@ -3213,6 +3224,9 @@ PY_TG_RESTORE
     green "    UFW state and runtime rules restored"
     if [[ -x /usr/local/lib/vibehost-guard/guard.sh && -f /etc/systemd/system/vibehost-guard.service ]]; then
         restore_unit_state vibehost-guard.service
+        if [[ -f /etc/systemd/system/vibehost-guard-dpid.service ]]; then
+            restore_unit_state vibehost-guard-dpid.service
+        fi
         restore_unit_state vibehost-guard-tick.timer
         if systemctl is-active --quiet vibehost-guard.service || systemctl is-active --quiet vibehost-guard-tick.timer; then
             env -u VH_GUARD_API -u VH_GUARD_LOCKED sh /usr/local/lib/vibehost-guard/guard.sh apply || die "Failed to restore BitTorrent guard rules"

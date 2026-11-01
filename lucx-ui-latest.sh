@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.11.01-333.3"
+PRO_COMPAT_REVISION="2026.11.01-335.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -987,7 +987,7 @@ PY_UPDATE_CERT_FILES
     (( available_kb >= snapshot_kb + 65536 )) || {
         msg_err 'Недостаточно места для локального отката; панель не обновлена.'; return 1;
     }
-    local was_active=0 was_enabled=0 failed=0 awg_present=0 guard_active=0 guard_timer_active=0 logs_active=0 bittorrent_guard_active=0
+    local was_active=0 was_enabled=0 failed=0 awg_present=0 guard_active=0 guard_timer_active=0 logs_active=0 bittorrent_guard_active=0 bittorrent_dpid_active=0
     local -a required_services=()
     local service
     for service in nginx AdGuardHome lucx-clash-sub; do
@@ -1001,6 +1001,7 @@ PY_UPDATE_CERT_FILES
     systemctl is-active --quiet lucx-awg-sysctl-guard.path && guard_active=1
     systemctl is-active --quiet lucx-awg-sysctl-guard.timer && guard_timer_active=1
     systemctl is-active --quiet lucx-log-policy.timer && logs_active=1
+    systemctl is-active --quiet vibehost-guard-dpid.service 2>/dev/null && bittorrent_dpid_active=1
     if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/x-ui/.awg-module-version ]]; then awg_present=1; fi
     save_renewal_state "$stage/renewal-before" || return 1
     systemctl stop x-ui || return 1
@@ -1118,6 +1119,9 @@ PY_ARCH_LISTEN_CHANGED
             msg_err 'Обновление не прошло проверку. Возвращаем файлы, DB и бинарники из локального снимка.'
         fi
         systemctl stop x-ui || true
+        if [[ -f /etc/systemd/system/vibehost-guard-dpid.service ]]; then
+            systemctl stop vibehost-guard-dpid.service || return 1
+        fi
         systemctl stop lucx-awg-sysctl-guard.timer lucx-awg-sysctl-guard.path lucx-awg-readiness.service 2>/dev/null || true
         systemctl stop lucx-log-policy.timer lucx-log-policy.service 2>/dev/null || true
         # Replace panel-owned directories; restore shared system directories by
@@ -1134,7 +1138,9 @@ PY_ARCH_LISTEN_CHANGED
         done
         # Remove only helpers/units introduced by this attempt, including their
         # enable symlinks. Shared systemd/sysctl directories remain intact.
-        for entry in /usr/local/sbin/lucx-awg-sysctl-guard \
+        for entry in /etc/systemd/system/vibehost-guard-dpid.service \
+                     /etc/systemd/system/multi-user.target.wants/vibehost-guard-dpid.service \
+                     /usr/local/sbin/lucx-awg-sysctl-guard \
                      /etc/systemd/system/lucx-awg-sysctl-guard.timer \
           /etc/systemd/system/timers.target.wants/lucx-awg-sysctl-guard.timer \
           /etc/systemd/system/multi-user.target.wants/lucx-awg-sysctl-guard.service \
@@ -1166,6 +1172,7 @@ PY_ARCH_LISTEN_CHANGED
         if (( bittorrent_guard_active )); then
             systemctl enable --now vibehost-guard.service vibehost-guard-tick.timer || true
         fi
+        (( ! bittorrent_dpid_active )) || systemctl start vibehost-guard-dpid.service || return 1
         refresh_bittorrent_guard_rules || true
         sysctl -w "net.ipv4.tcp_congestion_control=$saved_cc" "net.core.default_qdisc=$saved_qdisc" >/dev/null || true
         nginx -t && systemctl restart nginx || {
@@ -3264,7 +3271,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.01-333.3'
+REVISION = '2026.11.01-335.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -4322,7 +4329,7 @@ bittorrent_guard_backup() {
         (umask 077; "$cmd-save" >"$BITTORRENT_GUARD_BACKUP/$cmd.rules") || return 1
     done
     for path in /usr/local/lib/vibehost-guard /etc/vibehost-guard /etc/cron.d/vibehost-guard \
-                /etc/systemd/system/vibehost-guard.service \
+                /etc/systemd/system/vibehost-guard.service /etc/systemd/system/vibehost-guard-dpid.service \
                 /etc/systemd/system/vibehost-guard-tick.service /etc/systemd/system/vibehost-guard-tick.timer \
                 "${PREINSTALL_STATE_DIR}/firewall/iptables.v4" "${PREINSTALL_STATE_DIR}/firewall/iptables.v6"; do
         [[ -e "$path" ]] || continue
@@ -4333,7 +4340,7 @@ bittorrent_guard_backup() {
 
 remove_bittorrent_guard() (
     local cmd hook unit
-    for unit in vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard.service; do
+    for unit in vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard-dpid.service vibehost-guard.service; do
         [[ -f "/etc/systemd/system/$unit" ]] || continue
         systemctl stop "$unit" || return 1
         systemctl disable "$unit" >/dev/null 2>&1 || return 1
@@ -4353,7 +4360,7 @@ remove_bittorrent_guard() (
             "$cmd" -w -X VH_GUARD || return 1
         fi
     done
-    rm -f /etc/systemd/system/vibehost-guard.service \
+    rm -f /etc/systemd/system/vibehost-guard.service /etc/systemd/system/vibehost-guard-dpid.service \
           /etc/systemd/system/vibehost-guard-tick.service /etc/systemd/system/vibehost-guard-tick.timer \
           /etc/cron.d/vibehost-guard || return 1
     rm -rf -- /usr/local/lib/vibehost-guard /etc/vibehost-guard || return 1
@@ -4378,7 +4385,9 @@ install_bittorrent_guard() {
     [[ ! -L "$log" ]] || { rm -f "$installer"; return 1; }
     # The upstream code is optional enrollment, not an expiry for the local firewall.
     (umask 077; : >"$log") && chmod 0600 "$log" || { rm -f "$installer"; return 1; }
-    if ! (env -u VH_GUARD_API -u VH_GUARD_LOCKED sh "$installer" </dev/null &&
+    # The optional DynamicUser analyser must be able to traverse its public binary directory.
+    if ! (install -d -m 0755 /usr/local/lib/vibehost-guard &&
+          env -u VH_GUARD_API -u VH_GUARD_LOCKED sh "$installer" </dev/null &&
           systemctl enable --now vibehost-guard.service vibehost-guard-tick.timer &&
           systemctl is-active --quiet vibehost-guard.service &&
           systemctl is-active --quiet vibehost-guard-tick.timer) >"$log" 2>&1; then
