@@ -89,7 +89,7 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.11.01-335.1"
+PRO_COMPAT_REVISION="2026.11.03-339.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -987,7 +987,7 @@ PY_UPDATE_CERT_FILES
     (( available_kb >= snapshot_kb + 65536 )) || {
         msg_err 'Недостаточно места для локального отката; панель не обновлена.'; return 1;
     }
-    local was_active=0 was_enabled=0 failed=0 awg_present=0 guard_active=0 guard_timer_active=0 logs_active=0 bittorrent_guard_active=0 bittorrent_dpid_active=0
+    local was_active=0 was_enabled=0 failed=0 awg_present=0 guard_active=0 guard_timer_active=0 logs_active=0 bittorrent_guard_active=0 bittorrent_dpid_active=0 bittorrent_scan_active=0
     local -a required_services=()
     local service
     for service in nginx AdGuardHome lucx-clash-sub; do
@@ -1002,6 +1002,7 @@ PY_UPDATE_CERT_FILES
     systemctl is-active --quiet lucx-awg-sysctl-guard.timer && guard_timer_active=1
     systemctl is-active --quiet lucx-log-policy.timer && logs_active=1
     systemctl is-active --quiet vibehost-guard-dpid.service 2>/dev/null && bittorrent_dpid_active=1
+    systemctl is-active --quiet vibehost-guard-scan.path 2>/dev/null && bittorrent_scan_active=1
     if modinfo amneziawg >/dev/null 2>&1 || [[ -f /etc/x-ui/.awg-module-version ]]; then awg_present=1; fi
     save_renewal_state "$stage/renewal-before" || return 1
     systemctl stop x-ui || return 1
@@ -1119,6 +1120,9 @@ PY_ARCH_LISTEN_CHANGED
             msg_err 'Обновление не прошло проверку. Возвращаем файлы, DB и бинарники из локального снимка.'
         fi
         systemctl stop x-ui || true
+        if [[ -f /etc/systemd/system/vibehost-guard-scan.path ]]; then
+            systemctl stop vibehost-guard-scan.path vibehost-guard-scan.service || return 1
+        fi
         if [[ -f /etc/systemd/system/vibehost-guard-dpid.service ]]; then
             systemctl stop vibehost-guard-dpid.service || return 1
         fi
@@ -1138,7 +1142,9 @@ PY_ARCH_LISTEN_CHANGED
         done
         # Remove only helpers/units introduced by this attempt, including their
         # enable symlinks. Shared systemd/sysctl directories remain intact.
-        for entry in /etc/systemd/system/vibehost-guard-dpid.service \
+        for entry in /etc/systemd/system/vibehost-guard-scan.path /etc/systemd/system/vibehost-guard-scan.service \
+                     /etc/systemd/system/multi-user.target.wants/vibehost-guard-scan.path \
+                     /etc/systemd/system/vibehost-guard-dpid.service \
                      /etc/systemd/system/multi-user.target.wants/vibehost-guard-dpid.service \
                      /usr/local/sbin/lucx-awg-sysctl-guard \
                      /etc/systemd/system/lucx-awg-sysctl-guard.timer \
@@ -1174,6 +1180,20 @@ PY_ARCH_LISTEN_CHANGED
         fi
         (( ! bittorrent_dpid_active )) || systemctl start vibehost-guard-dpid.service || return 1
         refresh_bittorrent_guard_rules || true
+        if [[ -f "$stage/rollback/usr/local/lib/vibehost-guard/guard.sh" ]] &&
+           ! grep -q '^SCAN_CHAIN=VH_GUARD_SCAN$' "$stage/rollback/usr/local/lib/vibehost-guard/guard.sh"; then
+            # The restored older guard has removed its jump; discard the later scan chain only.
+            for service in iptables ip6tables; do
+                command -v "$service" >/dev/null 2>&1 || continue
+                if "$service" -w -S VH_GUARD_SCAN >/dev/null 2>&1; then
+                    while "$service" -w -C VH_GUARD -m comment --comment vhscan -j VH_GUARD_SCAN >/dev/null 2>&1; do
+                        "$service" -w -D VH_GUARD -m comment --comment vhscan -j VH_GUARD_SCAN || return 1
+                    done
+                    "$service" -w -F VH_GUARD_SCAN && "$service" -w -X VH_GUARD_SCAN || return 1
+                fi
+            done
+        fi
+        (( ! bittorrent_scan_active )) || systemctl start vibehost-guard-scan.path || return 1
         sysctl -w "net.ipv4.tcp_congestion_control=$saved_cc" "net.core.default_qdisc=$saved_qdisc" >/dev/null || true
         nginx -t && systemctl restart nginx || {
             msg_err 'Файлы возвращены, но nginx не запустился после отката. Полный backup: /var/backups/x-ui.'; return 1;
@@ -3271,7 +3291,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.01-335.1'
+REVISION = '2026.11.03-339.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -4330,6 +4350,7 @@ bittorrent_guard_backup() {
     done
     for path in /usr/local/lib/vibehost-guard /etc/vibehost-guard /etc/cron.d/vibehost-guard \
                 /etc/systemd/system/vibehost-guard.service /etc/systemd/system/vibehost-guard-dpid.service \
+                /etc/systemd/system/vibehost-guard-scan.path /etc/systemd/system/vibehost-guard-scan.service \
                 /etc/systemd/system/vibehost-guard-tick.service /etc/systemd/system/vibehost-guard-tick.timer \
                 "${PREINSTALL_STATE_DIR}/firewall/iptables.v4" "${PREINSTALL_STATE_DIR}/firewall/iptables.v6"; do
         [[ -e "$path" ]] || continue
@@ -4339,8 +4360,8 @@ bittorrent_guard_backup() {
 }
 
 remove_bittorrent_guard() (
-    local cmd hook unit
-    for unit in vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard-dpid.service vibehost-guard.service; do
+    local cmd hook unit chain
+    for unit in vibehost-guard-tick.timer vibehost-guard-tick.service vibehost-guard-scan.path vibehost-guard-scan.service vibehost-guard-dpid.service vibehost-guard.service; do
         [[ -f "/etc/systemd/system/$unit" ]] || continue
         systemctl stop "$unit" || return 1
         systemctl disable "$unit" >/dev/null 2>&1 || return 1
@@ -4355,12 +4376,15 @@ remove_bittorrent_guard() (
                 "$cmd" -w -D "$hook" -j VH_GUARD || return 1
             done
         done
-        if "$cmd" -w -S VH_GUARD >/dev/null 2>&1; then
-            "$cmd" -w -F VH_GUARD || return 1
-            "$cmd" -w -X VH_GUARD || return 1
-        fi
+        for chain in VH_GUARD VH_GUARD_SCAN; do
+            if "$cmd" -w -S "$chain" >/dev/null 2>&1; then
+                "$cmd" -w -F "$chain" || return 1
+                "$cmd" -w -X "$chain" || return 1
+            fi
+        done
     done
     rm -f /etc/systemd/system/vibehost-guard.service /etc/systemd/system/vibehost-guard-dpid.service \
+          /etc/systemd/system/vibehost-guard-scan.path /etc/systemd/system/vibehost-guard-scan.service \
           /etc/systemd/system/vibehost-guard-tick.service /etc/systemd/system/vibehost-guard-tick.timer \
           /etc/cron.d/vibehost-guard || return 1
     rm -rf -- /usr/local/lib/vibehost-guard /etc/vibehost-guard || return 1
@@ -4375,7 +4399,7 @@ install_bittorrent_guard() {
     fi
     installer=$(mktemp) || return 1
     if ! curl -fsSL --proto '=https' --connect-timeout 15 --max-time 180 \
-        https://api.vibehost.net/api/v1/guard/guard.sh -o "$installer" || ! sh -n "$installer"; then
+        https://raw.githubusercontent.com/VIBEHOST-LLC/vibehost-guard/master/guard.sh -o "$installer" || ! sh -n "$installer"; then
         rm -f "$installer"
         msg_err 'Не удалось загрузить корректный установщик VibeHost Guard.'
         return 1
@@ -4418,7 +4442,7 @@ uninstall_bittorrent_guard() {
     # A later Pro uninstall must not resurrect rules captured before Pro was installed.
     for file in "${PREINSTALL_STATE_DIR}/firewall/iptables.v"{4,6}; do
         [[ -f "$file" ]] || continue
-        sed -i '/^:VH_GUARD /d; /^-A VH_GUARD /d; / -j VH_GUARD$/d; / -g VH_GUARD$/d' "$file" || return 1
+        sed -i '/^:VH_GUARD\(_SCAN\)\? /d; /^-A VH_GUARD\(_SCAN\)\? /d; / -j VH_GUARD\(_SCAN\)\?$/d; / -g VH_GUARD\(_SCAN\)\?$/d' "$file" || return 1
     done
     msg_ok 'Защита BitTorrent удалена. Другие правила firewall и панель не изменены.'
 }

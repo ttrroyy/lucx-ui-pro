@@ -108,7 +108,7 @@ curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-la
 
 ## BitTorrent Guard (опционально; отдельно или поверх панели)
 
-Устанавливает защиту [VibeHost Guard](https://api.vibehost.net/api/v1/guard/guard.sh) от торрент-трафика. Работает без ключа и регистрации, с автозапуском и без срока отключения.
+Устанавливает защиту [VibeHost Guard](https://github.com/VIBEHOST-LLC/vibehost-guard) от торрент-трафика. Работает без ключа и регистрации, с автозапуском и без срока отключения.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -bittorrent-guard y

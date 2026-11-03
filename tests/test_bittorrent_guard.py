@@ -33,15 +33,17 @@ if name=='curl':
 if name.endswith('-save'):
     print('unrelated-rules');sys.exit(0)
 if name=='create-guard':
-    state['guard']=True;state['hooks']={h:1 for h in ('INPUT','OUTPUT','FORWARD','DOCKER-USER')}
+    state['guard']=True;state['scan']=True;state['hooks']={h:1 for h in ('INPUT','OUTPUT','FORWARD','DOCKER-USER')}
 else:
     args=[a for a in args if a!='-w'];op=args[0];target=args[1]
     if op=='-C':sys.exit(0 if state['hooks'].get(target,0) else 1)
     if op=='-D':state['hooks'][target]-=1
-    elif op=='-S':sys.exit(0 if state['guard'] else 1)
-    elif op=='-F':assert target=='VH_GUARD'
+    elif op=='-S':sys.exit(0 if state['scan' if target=='VH_GUARD_SCAN' else 'guard'] else 1)
+    elif op=='-F':assert target in ('VH_GUARD','VH_GUARD_SCAN')
     elif op=='-X':
-        assert target=='VH_GUARD' and not any(state['hooks'].values());state['guard']=False
+        assert not any(state['hooks'].values())
+        if target=='VH_GUARD_SCAN':assert not state['guard'];state['scan']=False
+        else:assert target=='VH_GUARD';state['guard']=False
     else:raise AssertionError('Unexpected firewall mutation')
 (p/'state.json').write_text(json.dumps(state))
 '''
@@ -56,17 +58,17 @@ class BitTorrentGuard(unittest.TestCase):
             (root/'etc/systemd/system').mkdir(parents=True)
             snapshots=root/'var/lib/lucx-ui-preinstall/firewall';snapshots.mkdir(parents=True)
             for family in ('v4','v6'):
-                (snapshots/('iptables.'+family)).write_text('*filter\n:VH_GUARD - [0:0]\n:RKN - [0:0]\n-A INPUT -j VH_GUARD\n-A VH_GUARD -j DROP\n-A INPUT -j RKN\nCOMMIT\n')
+                (snapshots/('iptables.'+family)).write_text('*filter\n:VH_GUARD - [0:0]\n:VH_GUARD_SCAN - [0:0]\n:RKN - [0:0]\n-A INPUT -j VH_GUARD\n-A VH_GUARD -m comment --comment vhscan -j VH_GUARD_SCAN\n-A VH_GUARD_SCAN -j DROP\n-A INPUT -j RKN\nCOMMIT\n')
             for name in ('curl','systemctl','iptables','ip6tables','iptables-save','ip6tables-save','create-guard'):
                 path=root/'bin'/name;path.write_text(MOCK);path.chmod(0o755)
-            original={'guard':installed,'hooks':{'INPUT':2 if installed else 0,'OUTPUT':int(installed),'FORWARD':int(installed),'DOCKER-USER':int(installed)},'other':['RKN','user-rule']}
+            original={'guard':installed,'scan':installed,'hooks':{'INPUT':2 if installed else 0,'OUTPUT':int(installed),'FORWARD':int(installed),'DOCKER-USER':int(installed)},'other':['RKN','user-rule']}
             (root/'state.json').write_text(json.dumps(original))
             native=root/'usr/local/lib/vibehost-guard/guard.sh'
             conf=root/'etc/vibehost-guard/agent.conf'
             if installed:
                 native.parent.mkdir(parents=True);native.write_text('#!/bin/sh\nexit 0\n');native.chmod(0o755)
                 conf.parent.mkdir(parents=True);conf.write_text('fixture-registration\n');conf.chmod(0o600)
-                for name in ('vibehost-guard.service','vibehost-guard-dpid.service','vibehost-guard-tick.service','vibehost-guard-tick.timer'):
+                for name in ('vibehost-guard.service','vibehost-guard-dpid.service','vibehost-guard-scan.path','vibehost-guard-scan.service','vibehost-guard-tick.service','vibehost-guard-tick.timer'):
                     (root/'etc/systemd/system'/name).touch()
             provider='''#!/bin/sh
 printf '%s' "$#" > "$MOCK_DIR/provider-argc"
@@ -88,6 +90,8 @@ create-guard
             state=json.loads((root/'state.json').read_text())
             state['dpid_unit']=(root/'etc/systemd/system/vibehost-guard-dpid.service').exists()
             state['guard_library_mode']=native.parent.stat().st_mode & 0o777 if native.parent.exists() else None
+            state['scan_units']=[(root/'etc/systemd/system'/n).exists() for n in ('vibehost-guard-scan.path','vibehost-guard-scan.service')]
+            state['scan_backups']=len(list((root/'var/backups').glob('**/vibehost-guard-scan.path')))
             state['dpid_backups']=len(list((root/'var/backups').glob('**/vibehost-guard-dpid.service')))
             state['snapshots']=[p.read_text() for p in sorted(snapshots.iterdir())]
             calls=(root/'calls').read_text() if (root/'calls').exists() else ''
@@ -115,7 +119,9 @@ create-guard
     def test_uninstall_is_idempotent_and_removes_duplicate_owned_hooks(self):
         result,state,calls,native,conf,_=self.invoke('uninstall_bittorrent_guard && uninstall_bittorrent_guard',installed=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertFalse(state['guard']);self.assertFalse(any(state['hooks'].values()))
+        self.assertFalse(state['guard']);self.assertFalse(state['scan']);self.assertFalse(any(state['hooks'].values()))
+        self.assertFalse(any(state['scan_units']));self.assertGreater(state['scan_backups'],0)
+        self.assertLess(calls.index('systemctl stop vibehost-guard-scan.path'),calls.index('systemctl stop vibehost-guard-dpid.service'))
         self.assertFalse(native);self.assertIsNone(conf)
         self.assertFalse(state['dpid_unit']);self.assertGreater(state['dpid_backups'],0)
         self.assertIn('systemctl stop vibehost-guard-dpid.service',calls)
@@ -146,7 +152,8 @@ create-guard
     def test_partial_new_install_failure_removes_only_new_guard(self):
         result,state,_,native,_,_=self.invoke('install_bittorrent_guard',provider_fails=True)
         self.assertNotEqual(result.returncode,0);self.assertFalse(native)
-        self.assertFalse(state['guard']);self.assertFalse(any(state['hooks'].values()))
+        self.assertFalse(state['guard']);self.assertFalse(state['scan']);self.assertFalse(any(state['hooks'].values()))
+        self.assertFalse(any(state['scan_units']))
 
     def test_timer_start_failure_is_not_reported_as_success(self):
         result,state,_,native,_,_=self.invoke('install_bittorrent_guard',service_fails=True)
@@ -170,5 +177,48 @@ create-guard
         self.assertIn('vibehost-guard.service vibehost-guard-dpid.service vibehost-guard-tick.service',backup)
         self.assertGreater(backup.index('Failed to restore BitTorrent guard rules'),backup.index('UFW state and runtime rules restored'))
 
+
+
+@unittest.skipUnless(BASH,'bash required')
+class GuardSnapshotCleanup(unittest.TestCase):
+    def test_explicit_uninstall_cannot_resurrect_scan_rules_or_remove_foreign_chains(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); snapshots=root/'firewall'; snapshots.mkdir()
+            rules='*filter\n:VH_GUARD - [0:0]\n:VH_GUARD_SCAN - [0:0]\n:VH_GUARD_CUSTOM - [0:0]\n-A INPUT -j VH_GUARD\n-A VH_GUARD -m comment --comment vhscan -j VH_GUARD_SCAN\n-A VH_GUARD_SCAN -j DROP\n-A INPUT -j VH_GUARD_CUSTOM\n-A VH_GUARD_CUSTOM -j ACCEPT\nCOMMIT\n'
+            for family in (4,6): (snapshots/('iptables.v'+str(family))).write_text(rules)
+            script='bittorrent_guard_backup(){ :; }; remove_bittorrent_guard(){ :; }; msg_ok(){ :; }; msg_err(){ :; };\n'+function('uninstall_bittorrent_guard')+'\nuninstall_bittorrent_guard\n'
+            env=dict(os.environ,PREINSTALL_STATE_DIR=root.as_posix())
+            r=subprocess.run([BASH,'-c',script],env=env,capture_output=True,text=True,timeout=10)
+            self.assertEqual(r.returncode,0,r.stderr)
+            for family in (4,6):
+                self.assertEqual((snapshots/('iptables.v'+str(family))).read_text(),'*filter\n:VH_GUARD_CUSTOM - [0:0]\n-A INPUT -j VH_GUARD_CUSTOM\n-A VH_GUARD_CUSTOM -j ACCEPT\nCOMMIT\n')
+
+
+    def test_restore_preserves_independent_guard_service_state_when_archive_omits_guard(self):
+        backup=(REPO/'assets/backup/lucx-ui-backup.sh').read_text(encoding='utf-8')
+        a=backup.index('    # An archive without Guard must preserve')
+        stop=backup[a:backup.index('    # ── stop running services',a)]
+        a=backup.index('    if [[ -x /usr/local/lib/vibehost-guard/guard.sh && -f')
+        restore=backup[a:backup.index('    if systemctl is-active --quiet x-ui;',a)]
+        for archived in (False,True):
+            with self.subTest(archived=archived),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);stage=root/'staging';stage.mkdir()
+                native=root/'usr/local/lib/vibehost-guard/guard.sh';native.parent.mkdir(parents=True)
+                native.write_text('#!/bin/sh\nexit 0\n');native.chmod(0o755)
+                units=root/'etc/systemd/system';units.mkdir(parents=True)
+                for unit in ('vibehost-guard.service','vibehost-guard-dpid.service','vibehost-guard-scan.path'):(units/unit).touch()
+                if archived:
+                    old=stage/'files/usr/local/lib/vibehost-guard/guard.sh';old.parent.mkdir(parents=True)
+                    old.write_text('SCAN_CHAIN=VH_GUARD_SCAN\n')
+                script='systemctl(){ printf "CTL %s\\n" "$*" >> "$TEST_CALLS"; }; restore_unit_state(){ printf "RESTORE %s\\n" "$*" >> "$TEST_CALLS"; }; die(){ exit 1; };\n'+stop+'\n'+restore
+                for prefix in ('/usr/local/lib/vibehost-guard','/etc/systemd/system'):
+                    script=script.replace(' '+prefix,' '+root.as_posix()+prefix)
+                env=dict(os.environ,staging=stage.as_posix(),TEST_CALLS=(root/'calls').as_posix())
+                r=subprocess.run([BASH,'-c',script],env=env,capture_output=True,text=True,timeout=10)
+                self.assertEqual(r.returncode,0,r.stderr)
+                calls=(root/'calls').read_text()
+                self.assertEqual('CTL stop vibehost-guard-tick.timer' in calls,archived)
+                self.assertEqual('RESTORE vibehost-guard.service' in calls,archived)
+                self.assertEqual('RESTORE vibehost-guard-scan.path' in calls,archived)
 
 if __name__=='__main__':unittest.main()
