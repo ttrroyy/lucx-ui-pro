@@ -9,19 +9,19 @@
 
 ## Что устанавливается
 
-Поддержка VLESS TCP REALITY, VLESS XHTTP TLS, Telegram WEB-proxy — через порт 443, а так же Hysteria 2, qWDTT, CSQTT и OpenFlux
+Поддержка VLESS TCP REALITY, VLESS XHTTP TLS, Telegram WEB-proxy — через порт 443, а также [Hysteria 2](https://github.com/apernet/hysteria) на выбранном UDP-порту. Hysteria 2 можно добавить только при полной установке.
 
 | Компонент | Описание |
 |-----------|----------|
-| lucx-ui | VPN-панель с веб-интерфейсом |
-| nginx | Обратный прокси, SNI-роутинг |
-| certbot | Let's Encrypt SSL |
+| [lucx-ui](https://github.com/AlexeyLCP/lucx-ui) | VPN-панель с веб-интерфейсом |
+| [nginx](https://nginx.org/) | Обратный прокси, SNI-роутинг |
+| [certbot](https://certbot.eff.org/) | Let's Encrypt SSL |
 | Фейковый сайт | Случайный HTML-сайт-прикрытие |
 | Бэкап | Скрипт резервного копирования |
 | AdGuard Home | Опционально: self-hosted DNS с блокировкой рекламы (DoH) |
 | rkn-guard | Опционально: защита от сканеров РКН |
 | BitTorrent Guard | Опционально: блокировка торрент-трафика по сигнатурам |
-| fail2ban | Защита от сканеров |
+| [fail2ban](https://github.com/fail2ban/fail2ban) | Защита от сканеров |
 
 ---
 
@@ -67,80 +67,24 @@ curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-la
 
 ---
 
-## AdGuard Home (опционально; поверх панели)
+## Компоненты
 
-Устанавливает [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) на домен панели — без отдельного домена и открытых портов, всё через существующий 443:
-
-- **DNS-over-HTTPS** для клиентов: `https://<домен-панели>/dns-query`
-- **Админка** — на случайном пути `/adg-<random>/` (логин и пароль выводит скрипт)
+Открыть общее меню:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -adguard y
+curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -components y
 ```
 
-Повторный запуск безопасен (настройки и пароль сохраняются), он просто перезаписывает nginx.
+Выберите **Установить**, **Переустановить** или **Удалить**, затем введите номера нужных компонентов через пробел или запятую. В меню видно, какие компоненты активны, отключены или не установлены. Для уже установленного компонента действие «Установить» использует ту же логику, что и переустановка.
 
-Удаление:
+| Компонент | Описание |
+|-----------|----------|
+| [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) | DNS с блокировкой рекламы. DoH: `https://<домен-панели>/dns-query`, админка — на случайном пути `/adg-<random>/`. Настройки и пароль сохраняются при повторной установке. Если Xray использует этот DoH, удаление потребует подтверждения после предупреждения. |
+| [RKN Guard](https://github.com/Flecksis/rkn-guard) | Защита от сканеров, автообновление программы и списков IP. |
+| [BitTorrent Guard](https://github.com/VIBEHOST-LLC/vibehost-guard) | Сигнатурная защита от торрент-трафика, без ключа и регистрации. Работает и отдельно от панели; сохраняется при её удалении. |
+| [Telegram WEB-proxy](https://github.com/telegramdesktop/tproxy-server) | Подключение Telegram через общий домен и 443. При переустановке выдаётся новая ссылка. |
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -adguard-uninstall y
-```
-
----
-
-## rkn-guard (опционально; поверх панели)
-
-Устанавливает [rkn-guard](https://github.com/Flecksis/rkn-guard) для защиты от сканеров и сетевого шума, настраивает автообновление программы и баз IP-адресов сканеров.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -rkn-guard y
-```
-
-Повторный запуск переустановит программу.
-
-Удаление:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -rkn-guard-uninstall y
-```
-
----
-
-## BitTorrent Guard (опционально; отдельно или поверх панели)
-
-Устанавливает защиту [VibeHost Guard](https://github.com/VIBEHOST-LLC/vibehost-guard) от торрент-трафика. Работает без ключа и регистрации, с автозапуском и без срока отключения.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -bittorrent-guard y
-```
-
-Повторный запуск переустановит защиту. При обычном `-update y` включённая защита обновляется автоматически.
-
-Удаление:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -bittorrent-guard-uninstall y
-```
-
-Удаление панели сохраняет защиту. Фильтр распознаёт сигнатуры, блокировка зашифрованного или обфусцированного BitTorrent не гарантируется.
-
----
-
-## Telegram WEB-proxy (опционально; поверх панели)
-
-Устанавливает [telegram web-proxy](https://github.com/telegramdesktop/tproxy-server) в панель, выдает ссылку для подключения.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -tg-web-proxy y
-```
-
-Использует домен и сертификат панели. Повторный запуск переустановит Telegram WEB-proxy и выдаст новую ссылку для подключения.
-
-Удаление:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-latest.sh -o /root/lucx-ui-latest.sh && bash /root/lucx-ui-latest.sh -tg-web-proxy-uninstall y
-```
+Включённый BitTorrent Guard обновляется при обычном `-update y`. Блокировка зашифрованного или обфусцированного BitTorrent не гарантируется.
 
 ---
 
@@ -152,14 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/ttrroyy/lucx-ui-pro/main/lucx-ui-la
 | `-version <версия>` | Выбрать релиз для установки или обновления (например `v3.9.0-lucx.286`), по умолчанию — последний стабильный |
 | `-update y` | Обновить установленную через Pro панель версии 286 и новее |
 | `-uninstall y` | Полное удаление установки с сохранением сертификатов |
-| `-adguard y` | Установка AdGuard Home |
-| `-adguard-uninstall y` | Удаление AdGuard Home |
-| `-rkn-guard y` | Установка rkn-guard |
-| `-rkn-guard-uninstall y` | Удаление rkn-guard |
-| `-bittorrent-guard y` | Установка BitTorrent Guard |
-| `-bittorrent-guard-uninstall y` | Удаление BitTorrent Guard |
-| `-tg-web-proxy y` | Установка tg-web-proxy |
-| `-tg-web-proxy-uninstall y` | Удаление tg-web-proxy |
+| `-components y` | Меню установки, переустановки и удаления компонентов |
 
 ---
 

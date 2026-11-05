@@ -1550,7 +1550,30 @@ def patch_telegram_location(text, relay):
     return text[:a] + '\n' + location + text[c+1:]
 
 
-def patch_stream(text, old_domains, domain, reality_enabled):
+def reality_web_fallback(text):
+    matches = [(b, c) for a, b, c, depth in block_spans(text)
+               if depth == 0 and re.search(r'\bupstream\s+xray\s*$', text[a:b])]
+    if len(matches) != 1: raise RuntimeError('Ambiguous managed REALITY upstream')
+    b, c = matches[0]
+    body = text[b+1:c]
+    primary = r'(\bserver\s+127\.0\.0\.1:8443)([^;]*);'
+    if len(re.findall(primary, body)) != 1:
+        raise RuntimeError('Managed REALITY upstream listener not found')
+    def keep_primary(match):
+        options = re.sub(r'\s+max_fails=\S+', '', match[2])
+        return match[1] + options.rstrip() + ' max_fails=0;'
+    # Never mark REALITY down: re-enabling it must take effect on the next connection.
+    body = re.sub(primary, keep_primary, body)
+    backup = r'\bserver\s+127\.0\.0\.1:7443\s+backup\s*;'
+    if not re.search(backup, body):
+        if re.search(r'\bserver\s+127\.0\.0\.1:7443\b', body):
+            raise RuntimeError('Conflicting nginx web fallback listener')
+        body = body.rstrip() + '\n    server 127.0.0.1:7443 backup;\n'
+    return text[:b+1] + body + text[c:]
+
+
+def patch_stream(text, old_domains, domain):
+    text = reality_web_fallback(text)
     pattern = r'(?m)^[ \t]*(' + '|'.join(map(re.escape, set(old_domains))) + r')\s+(?:xray|www|tproxy);[ \t]*\n?'
     cleaned, count = re.subn(pattern, '', text)
     if not count: raise RuntimeError('Managed nginx SNI routes not found')
@@ -1558,7 +1581,7 @@ def patch_stream(text, old_domains, domain, reality_enabled):
                if depth == 0 and re.search(r'map\s+\$ssl_preread_server_name\s+\$sni_name\s*$', cleaned[a:b])]
     if len(matches) != 1: raise RuntimeError('Ambiguous nginx SNI map')
     b = matches[0]
-    return cleaned[:b+1] + '\n    ' + domain + (' xray;' if reality_enabled else ' www;') + cleaned[b+1:]
+    return cleaned[:b+1] + '\n    ' + domain + ' xray;' + cleaned[b+1:]
 
 
 def reconcile(root, remember=False, changes=None, unify=False):
@@ -1690,12 +1713,10 @@ def reconcile(root, remember=False, changes=None, unify=False):
         if not remember:
             if unified:
                 stream = root / 'etc/nginx/stream-enabled/stream.conf'
-                owned_reality = new_manifest['objects'].get('reality', {})
-                enabled = owned_reality.get('present', True) and owned_reality.get('record', {}).get('enable', False)
                 retired_routes = old_domains[:2] + [name for name in old_domains[2:]
                     if not any(r['protocol'] == 'tproxy' and object_value(r['settings']).get('hostname') == name
                                and (not tg_row or r['id'] != tg_row[0]['id']) for r in all_rows)]
-                planned_files[stream] = patch_stream(stream.read_text(), retired_routes, domains[0], enabled)
+                planned_files[stream] = patch_stream(stream.read_text(), retired_routes, domains[0])
                 redirect = root / 'etc/nginx/sites-available/80.conf'
                 if redirect.is_file():
                     def redirect_names(match):
@@ -1853,7 +1874,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.03-339.1'
+REVISION = '2026.11.05-343.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3

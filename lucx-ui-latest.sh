@@ -89,7 +89,8 @@ AUTODOMAIN="n"
 CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
-PRO_COMPAT_REVISION="2026.11.03-339.1"
+COMPONENTS_ONLY=""
+PRO_COMPAT_REVISION="2026.11.05-343.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -288,9 +289,6 @@ PY_LUCX_LOG_POLICY
     python3 /usr/local/lib/lucx-ui-pro/log-policy.py "$@"
 }
 DNS_CHOICE=""
-DEPLOY_QWDTT=""
-DEPLOY_CSQTT=""
-DEPLOY_OPENFLUX=""
 DEPLOY_AGH=""
 DEPLOY_HY2=""
 DEPLOY_TPROXY=""
@@ -599,14 +597,7 @@ Usage:
   bash lucx-ui-latest.sh -install y [options]
   bash lucx-ui-latest.sh -update y [-version v3.9.0-lucx.287]
   bash lucx-ui-latest.sh -uninstall y
-  bash lucx-ui-latest.sh -adguard y
-  bash lucx-ui-latest.sh -adguard-uninstall y
-  bash lucx-ui-latest.sh -rkn-guard y
-  bash lucx-ui-latest.sh -rkn-guard-uninstall y
-  bash lucx-ui-latest.sh -bittorrent-guard y
-  bash lucx-ui-latest.sh -bittorrent-guard-uninstall y
-  bash lucx-ui-latest.sh -tg-web-proxy y
-  bash lucx-ui-latest.sh -tg-web-proxy-uninstall y
+  bash lucx-ui-latest.sh -components y
 EOF
 }
 
@@ -620,6 +611,7 @@ require_arg_value() {
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        -components)       require_arg_value "$@"; COMPONENTS_ONLY="$2";    shift 2 ;;
         -update)           require_arg_value "$@"; UPDATE_COMPAT="$2";      shift 2 ;;
         -install)          require_arg_value "$@"; INSTALL="$2";            shift 2 ;;
         -ONLY_CF_IP_ALLOW) require_arg_value "$@"; CFALLOW="$2";            shift 2 ;;
@@ -638,7 +630,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-for _action_value in "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$COMPONENTS_ONLY" "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$BITTORRENT_GUARD_ONLY" "$BITTORRENT_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
@@ -654,7 +646,7 @@ done
 }
 
 _action_count=0
-for _action_value in "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
+for _action_value in "$COMPONENTS_ONLY" "$UPDATE_COMPAT" "$INSTALL" "$UNINSTALL" "$ADGUARD_ONLY" "$ADGUARD_UNINSTALL" \
                      "$RKN_GUARD_ONLY" "$RKN_GUARD_UNINSTALL" \
                      "$BITTORRENT_GUARD_ONLY" "$BITTORRENT_GUARD_UNINSTALL" \
                      "$TG_WEB_PROXY_ONLY" "$TG_WEB_PROXY_UNINSTALL"; do
@@ -1563,7 +1555,7 @@ choose_hy2_port() {
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        msg_inf 'Выберите порт для Hysteria2:'
+        msg_inf 'Выберите UDP-порт для Hysteria 2:'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
         echo -en 'Порт: '
         if [[ -n "$tty" ]]; then
@@ -1577,12 +1569,6 @@ choose_hy2_port() {
             continue
         fi
         # TCP listeners (including nginx :443) do not occupy UDP ports.
-        # Sidecars selected below have not started yet; reserve only their UDP ports.
-        if { [[ "${DEPLOY_CSQTT:-}" == 1 && "$p" == 46000 ]]; } ||
-           { [[ "${DEPLOY_QWDTT:-}" == 1 ]] && [[ "$p" == 56000 || "$p" == 56001 || "$p" == 56003 ]]; }; then
-            msg_err "UDP-порт ${p} нужен выбранному дополнительному инбаунду."
-            continue
-        fi
         if ss -Hlnu "sport = :$p" 2>/dev/null | grep -q .; then
             msg_err "Порт ${p} занят."
             continue
@@ -1594,87 +1580,52 @@ choose_hy2_port() {
 }
 
 choose_extra_inbounds() {
-    local ans mapped tty tok confirm names has1 has_valid want_hy2 want_q want_c want_tproxy want_openflux ok arch
-    local -a toks
-    DEPLOY_HY2="2"; DEPLOY_QWDTT=""; DEPLOY_CSQTT=""; DEPLOY_TPROXY=""; DEPLOY_OPENFLUX=""
+    local answer selected confirm tty="" arch
+    DEPLOY_HY2=2; DEPLOY_TPROXY=""
     hy2_port=""; webproxy_domain=""; TPROXY_SECRET=""
     arch=$(uname -m)
-    tty="/dev/tty"; [[ -t 0 && -r /dev/tty ]] || tty=""
+    [[ ! -t 0 || ! -r /dev/tty ]] || tty=/dev/tty
     while true; do
         echo
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        msg_inf 'Дополнительные инбаунды (перечислите цифры через запятую без пробелов):'
-        echo '1 - Без дополнительных инбаундов'
-        echo '2 - Hysteria2'
-        echo '3 - qWDTT'
-        echo '4 - CSQTT'
-        echo '5 - Telegram WEB-proxy'
-        echo '6 - OpenFlux'
+        msg_inf 'Дополнительные инбаунды при установке:'
+        echo '  1) Без дополнительных инбаундов'
+        echo '  2) Hysteria 2'
+        echo '  3) Telegram WEB-proxy'
         msg_inf '────────────────────────────────────────────────────────────────────────────────'
-        echo -en 'Выберите инбаунды:'
-        if [[ -n "$tty" ]]; then read -r ans <"$tty" || return 1; else read -r ans || return 1; fi
-        mapped=$(echo "$ans" | tr -d '[:space:]')
-        [[ -n "$mapped" ]] || continue
-        if [[ ! "$mapped" =~ ^[1-6](,[1-6])*$ ]] ||
-           [[ "$mapped" != "1" && ",$mapped," == *",1,"* ]]; then
-            msg_err "Введите номера 2–6 через запятую либо 1 без других номеров."
+        echo -en 'Выберите инбаунды: '
+        if [[ -n "$tty" ]]; then read -r answer <"$tty" || return 1
+        else read -r answer || return 1; fi
+        selected=$(printf '%s' "$answer" | tr -d '[:space:]')
+        if [[ ! "$selected" =~ ^[1-3](,[1-3])*$ ]] ||
+           [[ "$selected" != 1 && ",$selected," == *",1,"* ]]; then
+            msg_err 'Введите 2, 3 или 2,3. Для установки без дополнительных инбаундов введите 1.'
             continue
         fi
-        if [[ ",$mapped," == *",5,"* && "$arch" != "x86_64" ]]; then
-            msg_err "Telegram WEB-proxy доступен только на x86_64 (MTProxy)."
-            continue
+        if [[ ",$selected," == *",3,"* && "$arch" != x86_64 ]]; then
+            msg_err 'Telegram WEB-proxy доступен только на x86_64 (MTProxy).'; continue
         fi
-        has1=0; has_valid=0; want_hy2=0; want_q=0; want_c=0; want_tproxy=0; want_openflux=0
-        IFS=',' read -ra toks <<< "$mapped"
-        for tok in "${toks[@]}"; do
-            case "$tok" in
-                1) has1=1 ;;
-                2) has_valid=1; want_hy2=1 ;;
-                3) has_valid=1; want_q=1 ;;
-                4) has_valid=1; want_c=1 ;;
-                5) has_valid=1; want_tproxy=1 ;;
-                6) has_valid=1; want_openflux=1 ;;
-            esac
-        done
-        # The confirmation menu is redrawn in full after Enter/invalid input.
-        ok=""
+        echo
+        msg_inf 'Подтвердите выбор инбаундов:'
+        [[ ",$selected," != *",2,"* ]] || echo '  Hysteria 2'
+        [[ ",$selected," != *",3,"* ]] || echo '  Telegram WEB-proxy'
+        [[ "$selected" != 1 ]] || echo '  Без дополнительных инбаундов'
+        echo '  1) Установить'
+        echo '  2) Выбрать снова'
         while true; do
-            echo
-            msg_inf '────────────────────────────────────────────────────────────────────────────────'
-            if [[ "$has1" -eq 1 || "$has_valid" -eq 0 ]]; then
-                msg_inf 'Вы не выбрали ни одного инбаунда, все верно?'
-            else
-                names=""
-                [[ "$want_hy2" -eq 1 ]] && names+="Hysteria2, "
-                [[ "$want_q" -eq 1 ]] && names+="qWDTT, "
-                [[ "$want_c" -eq 1 ]] && names+="CSQTT, "
-                [[ "$want_tproxy" -eq 1 ]] && names+="Telegram WEB-proxy, "
-                [[ "$want_openflux" -eq 1 ]] && names+="OpenFlux, "
-                names="${names%, }"
-                msg_inf "Вы выбрали ${names}, все верно?"
-            fi
-            echo '1 - Да'
-            echo '2 - Нет, выбрать снова'
-            msg_inf '──────────────────────────────────────────────────────────────────────────────────────────'
             echo -en 'Выбор [1-2]: '
-            if [[ -n "$tty" ]]; then read -r confirm <"$tty" || return 1; else read -r confirm || return 1; fi
-            confirm=$(echo "$confirm" | tr -d '[:space:]')
-            case "$confirm" in
-                1) ok=1; break ;;
-                2) ok=0; break ;;
-                *) continue ;;
-            esac
+            if [[ -n "$tty" ]]; then read -r confirm <"$tty" || return 1
+            else read -r confirm || return 1; fi
+            confirm=$(printf '%s' "$confirm" | tr -d '[:space:]')
+            [[ "$confirm" != 1 && "$confirm" != 2 ]] || break
+            msg_err 'Введите 1 или 2.'
         done
-        [[ "$ok" == "1" ]] || continue
-        if [[ "$want_hy2" -eq 1 ]]; then DEPLOY_HY2="1"; else DEPLOY_HY2="2"; fi
-        if [[ "$want_q" -eq 1 ]]; then DEPLOY_QWDTT="1"; else DEPLOY_QWDTT=""; fi
-        if [[ "$want_c" -eq 1 ]]; then DEPLOY_CSQTT="1"; else DEPLOY_CSQTT=""; fi
-        if [[ "$want_tproxy" -eq 1 ]]; then DEPLOY_TPROXY="1"; else DEPLOY_TPROXY=""; fi
-        if [[ "$want_openflux" -eq 1 ]]; then DEPLOY_OPENFLUX="1"; else DEPLOY_OPENFLUX=""; fi
-        break
+        [[ "$confirm" == 1 ]] || continue
+        [[ ",$selected," != *",2,"* ]] || DEPLOY_HY2=1
+        [[ ",$selected," != *",3,"* ]] || DEPLOY_TPROXY=1
+        if [[ "$DEPLOY_HY2" == 1 ]]; then choose_hy2_port || return 1; fi
+        return 0
     done
-    if [[ "$DEPLOY_HY2" == "1" ]]; then choose_hy2_port; else hy2_port=""; fi
-    echo
 }
 
 domain_a_ok() {
@@ -2988,7 +2939,30 @@ def patch_telegram_location(text, relay):
     return text[:a] + '\n' + location + text[c+1:]
 
 
-def patch_stream(text, old_domains, domain, reality_enabled):
+def reality_web_fallback(text):
+    matches = [(b, c) for a, b, c, depth in block_spans(text)
+               if depth == 0 and re.search(r'\bupstream\s+xray\s*$', text[a:b])]
+    if len(matches) != 1: raise RuntimeError('Ambiguous managed REALITY upstream')
+    b, c = matches[0]
+    body = text[b+1:c]
+    primary = r'(\bserver\s+127\.0\.0\.1:8443)([^;]*);'
+    if len(re.findall(primary, body)) != 1:
+        raise RuntimeError('Managed REALITY upstream listener not found')
+    def keep_primary(match):
+        options = re.sub(r'\s+max_fails=\S+', '', match[2])
+        return match[1] + options.rstrip() + ' max_fails=0;'
+    # Never mark REALITY down: re-enabling it must take effect on the next connection.
+    body = re.sub(primary, keep_primary, body)
+    backup = r'\bserver\s+127\.0\.0\.1:7443\s+backup\s*;'
+    if not re.search(backup, body):
+        if re.search(r'\bserver\s+127\.0\.0\.1:7443\b', body):
+            raise RuntimeError('Conflicting nginx web fallback listener')
+        body = body.rstrip() + '\n    server 127.0.0.1:7443 backup;\n'
+    return text[:b+1] + body + text[c:]
+
+
+def patch_stream(text, old_domains, domain):
+    text = reality_web_fallback(text)
     pattern = r'(?m)^[ \t]*(' + '|'.join(map(re.escape, set(old_domains))) + r')\s+(?:xray|www|tproxy);[ \t]*\n?'
     cleaned, count = re.subn(pattern, '', text)
     if not count: raise RuntimeError('Managed nginx SNI routes not found')
@@ -2996,7 +2970,7 @@ def patch_stream(text, old_domains, domain, reality_enabled):
                if depth == 0 and re.search(r'map\s+\$ssl_preread_server_name\s+\$sni_name\s*$', cleaned[a:b])]
     if len(matches) != 1: raise RuntimeError('Ambiguous nginx SNI map')
     b = matches[0]
-    return cleaned[:b+1] + '\n    ' + domain + (' xray;' if reality_enabled else ' www;') + cleaned[b+1:]
+    return cleaned[:b+1] + '\n    ' + domain + ' xray;' + cleaned[b+1:]
 
 
 def reconcile(root, remember=False, changes=None, unify=False):
@@ -3128,12 +3102,10 @@ def reconcile(root, remember=False, changes=None, unify=False):
         if not remember:
             if unified:
                 stream = root / 'etc/nginx/stream-enabled/stream.conf'
-                owned_reality = new_manifest['objects'].get('reality', {})
-                enabled = owned_reality.get('present', True) and owned_reality.get('record', {}).get('enable', False)
                 retired_routes = old_domains[:2] + [name for name in old_domains[2:]
                     if not any(r['protocol'] == 'tproxy' and object_value(r['settings']).get('hostname') == name
                                and (not tg_row or r['id'] != tg_row[0]['id']) for r in all_rows)]
-                planned_files[stream] = patch_stream(stream.read_text(), retired_routes, domains[0], enabled)
+                planned_files[stream] = patch_stream(stream.read_text(), retired_routes, domains[0])
                 redirect = root / 'etc/nginx/sites-available/80.conf'
                 if redirect.is_file():
                     def redirect_names(match):
@@ -3291,7 +3263,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.03-339.1'
+REVISION = '2026.11.05-343.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -4152,98 +4124,6 @@ install_shareonly_client_sync() {
     run_pro_compat clients
 }
 
-insert_extra_inbound() {
-    [[ "${DEPLOY_QWDTT}" == "1" || "${DEPLOY_CSQTT}" == "1" || "${DEPLOY_TPROXY}" == "1" || "${DEPLOY_OPENFLUX}" == "1" ]] || return 0
-    [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found — cannot add extra inbound."; return 1; }
-    [[ -z "${IP4:-}" ]] && get_server_ip
-    local proto remark port listen_addr sub_host pass web_pass
-    _insert_one_extra() {
-        proto="$1"; remark="$2"; port="$3"; listen_addr="$4"; sub_host="$5"
-        pass=$(gen_random_string 16)
-        web_pass=$(gen_random_string 24)
-        python3 - "$XUIDB" "$proto" "$remark" "$port" "$listen_addr" "$sub_host" "$pass" "$web_pass" <<'PY'
-import json, sqlite3, sys
-db, proto, remark, port, listen_addr, sub_host, password, web_pass = sys.argv[1:9]
-port = int(port)
-if proto == "openflux":
-    settings = {"clients": [], "secret": web_pass, "shareHost": sub_host,
-                "yandexUrl": "", "mailruUrl": "", "cupsUrl": ""}
-elif proto == "qwdtt":
-    settings = {
-        "clients": [],
-        "remark": remark,
-        "enabled": True,
-        "listenAddr": listen_addr,
-        "wgPort": 56001,
-        "password": password,
-        "dns": "8.8.8.8",
-        "configDir": "",
-        "listenRaw": "0.0.0.0:56003",
-        "listenDirect": "",
-        "subHost": sub_host,
-        "vkHashes": "",
-        "clientPort": 9000,
-        "workers": 16,
-        "routeThroughXray": True,
-        "outboundTag": ""
-    }
-else:
-    settings = {
-        "clients": [],
-        "remark": remark,
-        "enabled": True,
-        "listenAddr": listen_addr,
-        "password": password,
-        "deviceId": "",
-        "webPass": web_pass,
-        "subHost": sub_host,
-        "vkHashes": "",
-        "configDir": "",
-        "routeThroughXray": False,
-        "outboundTag": ""
-    }
-stream = {"security": "none"}
-sniffing = {"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"], "metadataOnly": False, "routeOnly": False}
-tag = "inbound-" + proto
-con = sqlite3.connect(db, timeout=30)
-cur = con.cursor()
-row = cur.execute("SELECT id FROM inbounds WHERE protocol=? OR tag=? LIMIT 1", (proto, tag)).fetchone()
-if row:
-    con.close()
-    print("exists")
-    raise SystemExit(0)
-if proto == "openflux":
-    if cur.execute("SELECT 1 FROM inbounds WHERE port=? LIMIT 1", (port,)).fetchone():
-        raise RuntimeError("OpenFlux default port 18445 is already used by another inbound")
-    import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("0.0.0.0", port))
-cur.execute(
-    "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    (1, 0, 0, 0, remark, 1, 0, "", port, proto,
-     json.dumps(settings, ensure_ascii=False),
-     json.dumps(stream, ensure_ascii=False),
-     tag, json.dumps(sniffing, ensure_ascii=False)),
-)
-con.commit()
-con.close()
-print("ok", proto, port)
-PY
-        [[ $? -eq 0 ]] || { msg_err "Failed to insert ${remark} inbound."; return 1; }
-        msg_ok "Inbound ${remark} created (port ${port})."
-    }
-    if [[ "${DEPLOY_QWDTT}" == "1" ]]; then
-        _insert_one_extra qwdtt qWDTT 56000 '0.0.0.0:56000' "${IP4}:56000" || return 1
-    fi
-    if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
-        _insert_one_extra csqtt CSQTT 46000 '0.0.0.0:46000' "${IP4}" || return 1
-    fi
-    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
-        _insert_one_extra openflux OpenFlux 18445 "" "${IP4}" || return 1
-    fi
-    insert_tproxy_inbound || return 1
-    install_shareonly_client_sync
-}
 
 choose_adguard() {
     local ans mapped tty
@@ -4698,13 +4578,53 @@ uninstall_rkn_guard() {
     systemctl daemon-reload
     systemctl reset-failed 2>/dev/null || true
     systemctl restart rsyslog 2>/dev/null || true
-    msg_ok "rkn-guard removed."
+    msg_ok "RKN Guard удалён."
 }
 
 uninstall_adguard() {
     local quiet="${1:-}"
-    local had_adguard=0
+    local had_adguard=0 dns_state answer tty=""
     [[ -d /opt/AdGuardHome || -f /etc/nginx/snippets/adguard.conf || -f /root/.lucx-adguard-info ]] && had_adguard=1
+    if [[ "$quiet" != quiet && $had_adguard == 1 && -f "$XUIDB" ]]; then
+        dns_state=$(python3 - "$XUIDB" "$PREINSTALL_STATE_DIR/domains" <<'PY_ADGUARD_DNS_DEPENDENCY'
+from contextlib import closing
+import json, sqlite3, sys
+from pathlib import Path
+from urllib.parse import urlsplit
+domains = set(Path(sys.argv[2]).read_text().lower().splitlines())
+with closing(sqlite3.connect(Path(sys.argv[1]).as_uri() + '?mode=ro', uri=True)) as db:
+    row = db.execute("SELECT value FROM settings WHERE key='xrayTemplateConfig' ORDER BY id DESC LIMIT 1").fetchone()
+config = json.loads(row[0]) if row and row[0] else {}
+for _ in range(3):
+    if isinstance(config, str): config = json.loads(config)
+    elif isinstance(config, dict) and 'xraySetting' in config and 'dns' not in config: config = config['xraySetting']
+    else: break
+if not isinstance(config, dict): raise ValueError('Unknown Xray DNS configuration')
+dependent = False
+for server in (config.get('dns') or {}).get('servers', []) or []:
+    url = urlsplit(server if isinstance(server, str) else server.get('address', ''))
+    dependent |= url.scheme == 'https' and url.hostname in domains and url.port in (None, 443) and url.path.rstrip('/') == '/dns-query'
+print('dependent' if dependent else 'clear')
+PY_ADGUARD_DNS_DEPENDENCY
+        ) || { msg_err 'Не удалось проверить зависимость DNS Xray. AdGuard Home не удалён.'; return 1; }
+        if [[ "$dns_state" != clear ]]; then
+            msg_err 'Предупреждение: Xray использует DoH AdGuard Home. После удаления этот DNS перестанет работать.'
+            msg_inf 'DNS в панели нужно будет сменить самостоятельно. Настройки Xray автоматически не изменяются.'
+            echo '  1) Удалить AdGuard Home'
+            echo '  0) Отмена'
+            [[ ! -t 0 || ! -r /dev/tty ]] || tty=/dev/tty
+            while true; do
+                echo -en 'Выбор [0-1]: '
+                if [[ -n "$tty" ]]; then read -r answer <"$tty" || return 1
+                else read -r answer || return 1; fi
+                case "$answer" in
+                    1) break ;;
+                    0) msg_inf 'Удаление AdGuard Home отменено.'; return 2 ;;
+                    *) msg_err 'Введите 1 для удаления или 0 для отмены.' ;;
+                esac
+            done
+        fi
+    fi
     systemctl stop AdGuardHome 2>/dev/null || true
     [[ -x /opt/AdGuardHome/AdGuardHome ]] && /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
     rm -rf /opt/AdGuardHome /etc/nginx/snippets/adguard.conf /root/.lucx-adguard-info
@@ -4718,7 +4638,7 @@ uninstall_adguard() {
     fi
     command -v nginx >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
     if [[ "$quiet" != "quiet" && $had_adguard -eq 1 ]]; then
-        msg_ok "AdGuard Home removed."
+        msg_ok "AdGuard Home удалён."
     fi
 }
 install_adguard() {
@@ -4853,7 +4773,7 @@ EOF
         return 1
     }
     AGH_PATH="$agh_path"; AGH_USER="$agh_user"; AGH_PASS="$agh_pass"
-    msg_ok "AdGuard Home installed."
+    msg_ok "AdGuard Home установлен."
 }
 print_adguard_results() {
     local agh_path agh_user agh_pass agh_domain agh_ip H
@@ -4954,7 +4874,7 @@ uninstall_xui() {
     fi
     if [[ -f "$dir/adguard-installed" ]]; then
         msg_inf "Удаляю AdGuard Home..."
-        uninstall_adguard || msg_err "Не удалось полностью удалить AdGuard Home."
+        uninstall_adguard quiet || msg_err "Не удалось полностью удалить AdGuard Home."
     fi
     if [[ ! -f "$dir/awg-preexisting" ]]; then
         msg_inf "Удаляю AmneziaWG..."
@@ -5022,7 +4942,7 @@ fi
 # A normal repeated full installation must start from the same clean state as
 # an explicit "-uninstall y". Component-only maintenance commands are excluded.
 is_full_install_request() {
-    [[ "${UPDATE_COMPAT}" != "y" &&
+    [[ "${COMPONENTS_ONLY}" != "y" && "${UPDATE_COMPAT}" != "y" &&
        "${ADGUARD_ONLY}" != "y" &&
        "${ADGUARD_UNINSTALL}" != "y" &&
        "${RKN_GUARD_ONLY}" != "y" &&
@@ -5203,7 +5123,7 @@ validate_domains() {
     msg_inf "Общий домен панели, REALITY и XHTTP: ${domain}"
 }
 # Ask for the common hostname before optional components.
-if [[ "${UPDATE_COMPAT}" != "y" && "${ADGUARD_ONLY}" != "y" && "${ADGUARD_UNINSTALL}" != "y" && "${RKN_GUARD_ONLY}" != "y" && "${RKN_GUARD_UNINSTALL}" != "y" && "${BITTORRENT_GUARD_ONLY}" != "y" && "${BITTORRENT_GUARD_UNINSTALL}" != "y" && "${TG_WEB_PROXY_ONLY}" != "y" && "${TG_WEB_PROXY_UNINSTALL}" != "y" ]]; then
+if is_full_install_request; then
     choose_auto_domains || exit 1
     validate_domains || exit 1
 fi
@@ -5350,7 +5270,10 @@ ${tproxy_sni}
     default              xray;
 }
 
-upstream xray { server 127.0.0.1:8443; }
+upstream xray {
+    server 127.0.0.1:8443 max_fails=0;
+    server 127.0.0.1:7443 backup;
+}
 upstream www  { server 127.0.0.1:7443; }
 ${tproxy_up}
 
@@ -5713,15 +5636,6 @@ install_panel() {
         if [[ -z "$tag_version" || "$tag_version" == "null" ]]; then
             echo "Failed to fetch LucX-UI version." && exit 1
         fi
-    fi
-    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
-        python3 - "$tag_version" <<'PY_OPENFLUX_VERSION'
-import re,sys
-m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-lucx\.(\d+)',sys.argv[1])
-if not m or tuple(map(int,m.groups())) < (3,9,0,281):
-    raise SystemExit('OpenFlux requires panel v3.9.0-lucx.281 or newer.')
-PY_OPENFLUX_VERSION
-        [[ $? -eq 0 ]] || return 1
     fi
     echo "Installing LucX-UI ${tag_version} ..."
     release_url="$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"
@@ -7074,7 +6988,7 @@ setup_firewall() {
     ufw disable
     # The panel owns runtime forwarding; retire only the old Pro override.
     run_pro_compat firewall || return 1
-    # Keep allow routed for AWG/QWDTT with UFW; CSQTT owns its own rules.
+    # Keep routed traffic available to the panel's native tunnels.
     ufw default deny incoming
     ufw default allow outgoing
     ufw default allow routed
@@ -7083,17 +6997,6 @@ setup_firewall() {
     ufw allow 443/tcp
     if [[ "${DEPLOY_HY2}" == "1" && -n "${hy2_port}" ]]; then
         ufw allow ${hy2_port}/udp
-    fi
-    if [[ "${DEPLOY_QWDTT}" == "1" ]]; then
-        ufw allow 56000/udp
-        ufw allow 56001/udp
-        ufw allow 56003/udp
-    fi
-    if [[ "${DEPLOY_CSQTT}" == "1" ]]; then
-        ufw allow 46000/udp
-    fi
-    if [[ "${DEPLOY_OPENFLUX}" == "1" ]]; then
-        ufw allow 18445/tcp || return 1
     fi
     ufw --force enable
 }
@@ -7133,6 +7036,154 @@ show_results() {
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
+component_status() {
+    local installed=0 active=0 parent
+    case "$1" in
+        1)
+            [[ ! -d /opt/AdGuardHome ]] || installed=1
+            systemctl is-active --quiet AdGuardHome 2>/dev/null && active=1 ;;
+        2)
+            if command -v rkn-guard >/dev/null 2>&1; then
+                installed=1
+                for parent in INPUT ufw-before-input; do
+                    if iptables -w 2 -C "$parent" -j SCANNERS-BLOCK >/dev/null 2>&1; then active=1; break; fi
+                done
+            fi ;;
+        3)
+            [[ ! -f /usr/local/lib/vibehost-guard/guard.sh ]] || installed=1
+            if systemctl is-active --quiet vibehost-guard-tick.timer 2>/dev/null &&
+               iptables -w 2 -C INPUT -j VH_GUARD >/dev/null 2>&1; then active=1; fi ;;
+        4)
+            python3 - "$XUIDB" "$PREINSTALL_STATE_DIR/architecture.json" <<'PY_COMPONENT_TG_STATUS'
+import hashlib, json, socket, sqlite3, sys
+from contextlib import closing
+from pathlib import Path
+database, manifest = map(Path, sys.argv[1:])
+if not database.is_file():
+    print('Не установлен'); raise SystemExit(0)
+try:
+    saved = json.loads(manifest.read_text()).get('telegram', {}) if manifest.is_file() else {}
+    with closing(sqlite3.connect('file:' + database.as_posix() + '?mode=ro', uri=True, timeout=5)) as db:
+        rows = db.execute("SELECT id,enable,protocol,tag,settings FROM inbounds WHERE tag='inbound-tproxy' OR id=?", (saved.get('id', -1),)).fetchall()
+    owned = []
+    for row in rows:
+        settings = json.loads(row[4] or '{}')
+        if row[2] == 'tproxy' and settings.get('backend', 'legacy') in ('', 'legacy') and (
+                row[3] == 'inbound-tproxy' or hashlib.sha256(settings.get('secret', '').encode()).hexdigest() == saved.get('secret_sha256')):
+            owned.append(row)
+    if not owned:
+        print('Не установлен')
+    elif not any(row[1] for row in owned):
+        print('Отключён в панели')
+    else:
+        active = False
+        for row in owned:
+            if row[1]:
+                try:
+                    with socket.create_connection(('127.0.0.1', 24000 + row[0] * 4 + 2), timeout=1): active = True
+                except OSError: pass
+        print('Активен' if active else 'Установлен, неактивен')
+except (OSError, ValueError, TypeError, sqlite3.Error):
+    print('Не удалось проверить состояние')
+PY_COMPONENT_TG_STATUS
+            return $? ;;
+    esac
+    if (( active )); then printf '%s\n' 'Активен'
+    elif (( installed )); then printf '%s\n' 'Установлен, неактивен'
+    else printf '%s\n' 'Не установлен'; fi
+}
+
+show_components() {
+    local number status
+    local -a names=('AdGuard Home' 'RKN Guard' 'BitTorrent Guard' 'Telegram WEB-proxy')
+    msg_inf '────────────────────────────────────────────────────────────────────────────────'
+    msg_inf 'Компоненты'
+    for number in 1 2 3 4; do
+        status=$(component_status "$number") || return 1
+        if [[ "$status" == 'Активен' ]]; then
+            msg_ok "  ${number}) ${names[number-1]} — ${status}"
+        else
+            printf '  %s) %s — %s\n' "$number" "${names[number-1]}" "$status"
+        fi
+    done
+    msg_inf '────────────────────────────────────────────────────────────────────────────────'
+}
+
+components_menu() {
+    local action selection number result
+    local -a selected=()
+    local -A seen=()
+    echo
+    show_components || return 1
+    echo '  0) Отмена'
+    echo '  1) Установить'
+    echo '  2) Переустановить'
+    echo '  3) Удалить'
+    while true; do
+        read -r -p 'Действие [0-3]: ' action || return 1
+        case "$action" in
+            0) msg_inf 'Действие отменено. Компоненты не изменены.'; return 0 ;;
+            1|2|3) break ;;
+            *) msg_err 'Введите номер действия от 0 до 3.' ;;
+        esac
+    done
+    echo
+    msg_inf 'Выберите компоненты из списка выше. Для отмены введите 0.'
+    while true; do
+        read -r -p 'Номера компонентов через пробел: ' selection || return 1
+        selection="${selection//,/ }"
+        if [[ "$selection" =~ ^[[:space:]]*0[[:space:]]*$ ]]; then
+            msg_inf 'Действие отменено. Компоненты не изменены.'; return 0
+        fi
+        selected=(); seen=()
+        if [[ ! "$selection" =~ ^[[:space:]1-4]+$ ]]; then
+            msg_err 'Введите номера компонентов от 1 до 4 через пробел или запятую.'; continue
+        fi
+        for number in $selection; do
+            [[ "$number" =~ ^[1-4]$ ]] || break
+            if [[ -z "${seen[$number]:-}" ]]; then
+                selected+=("$number"); seen[$number]=1
+            fi
+        done
+        [[ ${#selected[@]} -gt 0 && "$number" =~ ^[1-4]$ ]] && break
+        msg_err 'Введите номера компонентов от 1 до 4 через пробел или запятую.'
+    done
+    # Validate the entire selection before running any component action.
+    if [[ ! -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]]; then
+        for number in "${selected[@]}"; do
+            [[ "$number" == 3 ]] || {
+                msg_err 'Сначала установите панель через lucx-ui-pro.'; return 1;
+            }
+        done
+    fi
+    for number in "${selected[@]}"; do
+        case "$action:$number" in
+            3:1)
+                uninstall_adguard; result=$?
+                [[ "$result" != 2 ]] || return 0
+                [[ "$result" == 0 ]] || return 1 ;;
+            3:2) uninstall_rkn_guard || return 1 ;;
+            3:3) uninstall_bittorrent_guard || return 1 ;;
+            3:4) uninstall_tg_web_proxy || return 1 ;;
+            1:1|2:1)
+                install_adguard || return 1
+                touch "$PREINSTALL_STATE_DIR/adguard-installed" || return 1
+                print_adguard_results || return 1 ;;
+            1:2|2:2)
+                choose_rkn_guard || return 1
+                if [[ "$DEPLOY_RKN" == 1 || "$DEPLOY_RKN" == 2 ]]; then
+                    install_rkn_guard "$DEPLOY_RKN" || return 1
+                    touch "$PREINSTALL_STATE_DIR/rkn-installed" || return 1
+                fi ;;
+            1:3|2:3) install_bittorrent_guard || return 1 ;;
+            1:4|2:4) install_tg_web_proxy || return 1 ;;
+        esac
+    done
+    echo
+    msg_ok 'Выбранные действия выполнены.'
+    show_components
+}
+
 main() {
     choose_adguard || return 1
     choose_xray_dns || return 1
@@ -7215,7 +7266,10 @@ main() {
 
     apply_xray_dns || return 1
     insert_hy2_inbound || return 1
-    insert_extra_inbound || return 1
+    if [[ "${DEPLOY_TPROXY}" == 1 ]]; then
+        insert_tproxy_inbound || return 1
+        install_shareonly_client_sync || return 1
+    fi
     # Register optional HY2 and normalize the same owned fields as update.
     run_architecture reconcile || return 1
     nginx -t && systemctl reload nginx || return 1
@@ -7239,6 +7293,11 @@ main() {
         maybe_reboot_for_awg
     fi
 }
+
+if [[ "$COMPONENTS_ONLY" == y ]]; then
+    components_menu
+    exit $?
+fi
 
 if [[ "${BITTORRENT_GUARD_UNINSTALL}" == y ]]; then
     uninstall_bittorrent_guard

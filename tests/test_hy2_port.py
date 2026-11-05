@@ -22,10 +22,10 @@ class Hy2PortSelection(unittest.TestCase):
         self.assertIn('SELECTED=443',result)
         self.assertNotIn('SELECTED=44443',result)
 
-    def test_selected_udp_sidecars_are_reserved_before_start(self):
-        result=self.select('56000\n56001\n56003\n46000\n443\n',env='DEPLOY_QWDTT=1; DEPLOY_CSQTT=1',stub='ss(){ :; }')
-        self.assertIn('SELECTED=443',result)
-        self.assertIn('SELECTED=56000',self.select('56000\n',stub='ss(){ :; }'))
+    def test_removed_sidecar_ports_are_available_when_no_udp_listener_exists(self):
+        for port in (56000, 56001, 56003, 46000):
+            with self.subTest(port=port):
+                self.assertIn('SELECTED='+str(port),self.select(str(port)+'\n',stub='ss(){ :; }'))
 
     def test_real_udp_listener_rejected_tcp_listener_accepted(self):
         if not shutil.which('ss'):self.skipTest('Linux ss unavailable')

@@ -63,6 +63,25 @@ server { listen 443; proxy_protocol on; proxy_pass $sni_name; ssl_preread on; }
 
 
 class OneDomain(unittest.TestCase):
+    def test_shared_domain_has_live_nginx_fallback_without_recreating_deleted_inbounds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); installation(root)
+            arch.reconcile(root, unify=True)
+            stream = root / 'etc/nginx/stream-enabled/stream.conf'
+            text = stream.read_text()
+            self.assertIn('server 127.0.0.1:8443 max_fails=0;', text)
+            self.assertEqual(text.count('server 127.0.0.1:7443 backup;'), 1)
+            self.assertIn('user.example custom;', text)
+            # Native deletion changes only SQLite; the fallback must already exist.
+            with connection(root / 'etc/x-ui/x-ui.db') as db:
+                db.execute('DELETE FROM inbounds WHERE id IN (1,2)')
+            self.assertEqual(stream.read_text(), text)
+            arch.reconcile(root)
+            self.assertNotIn(1, records(root)); self.assertNotIn(2, records(root))
+            self.assertEqual(stream.read_text().count('server 127.0.0.1:7443 backup;'), 1)
+            once = stream.read_text(); arch.reconcile(root)
+            self.assertEqual(stream.read_text(), once)
+
     def test_install_and_telegram_use_only_the_panel_domain_without_extra_prompts(self):
         bash=shutil.which('bash')
         if not bash:self.skipTest('bash unavailable')
@@ -197,7 +216,9 @@ IP4_REGEX='^[0-9.]+$'; DEPLOY_TPROXY=1
                 with connection(root/'etc/x-ui/x-ui.db') as db:
                     db.execute('DELETE FROM inbounds WHERE id=1' if deleted else 'UPDATE inbounds SET enable=0 WHERE id=1')
                 arch.reconcile(root,unify=True)
-                self.assertIn('main.example www;',(root/'etc/nginx/stream-enabled/stream.conf').read_text())
+                stream=(root/'etc/nginx/stream-enabled/stream.conf').read_text()
+                self.assertIn('main.example xray;',stream)
+                self.assertIn('server 127.0.0.1:7443 backup;',stream)
                 self.assertEqual(1 not in records(root),deleted)
 
     def test_removed_telegram_restores_static_root_without_recreating_it(self):
