@@ -262,6 +262,8 @@ BACKUP_PATHS=(
     /usr/local/bin/antiscan-aggregate-logs.sh
     /opt/rkn-guard-manager.sh
     /opt/rkn-guard-manual.list
+    /etc/rkn-guard-sources.list
+    /var/lib/rkn-guard/sources.json
     /usr/local/lib/vibehost-guard
     /etc/vibehost-guard
     /opt/AdGuardHome
@@ -880,7 +882,7 @@ verify_backup_archive() {
     python3 - "$file" <<'PY_VERIFY_ARCHIVE' || die "Invalid or unsafe backup archive"
 import json, pathlib, sys, tarfile
 archive = pathlib.Path(sys.argv[1])
-allowed = [p.lstrip('/') for p in ['/etc/nginx', '/etc/x-ui', '/etc/default/x-ui', '/etc/fail2ban', '/etc/cron.d', '/usr/local/x-ui', '/usr/bin/x-ui', '/usr/local/lib/3x-ui-pro', '/usr/local/lib/lucx-ui-pro', '/usr/local/sbin/lucx-apply-qdisc', '/usr/local/sbin/lucx-awg-sysctl-guard', '/etc/systemd/system', '/etc/letsencrypt', '/var/lib/letsencrypt', '/var/log/letsencrypt', '/etc/sysctl.conf', '/root/cert', '/var/www/html', '/var/www/diagnostics', '/var/www/subpage', '/var/www/tproxy', '/root/.lucx-tg-web-proxy-info', '/var/lib/lucx-ui-preinstall', '/etc/sysctl.d/99-lucx-ui-forwarding.conf', '/etc/sysctl.d/99-bbr-x-ui.conf', '/etc/sysctl.d/99-awg-performance.conf', '/etc/sysctl.d/99-zz-lucx-ui-tuning.conf', '/etc/modules-load.d/lucx-ui-network.conf', '/etc/modules-load.d/amneziawg.conf', '/etc/modules-load.d/tcp-bbr.conf', '/etc/default/ufw', '/etc/ufw/user.rules', '/etc/ufw/user6.rules', '/etc/ufw/before.rules', '/etc/ufw/before6.rules', '/etc/ipset.conf', '/etc/iptables/ipsets', '/etc/rsyslog.d/10-iptables-scanners.conf', '/etc/logrotate.d/iptables-scanners', '/etc/logrotate.d/nginx', '/etc/systemd/journald.conf.d/99-lucx-ui-pro-logs.conf', '/usr/local/bin/rkn-guard', '/usr/local/bin/rkn', '/usr/local/bin/antiscan-aggregate-logs.sh', '/opt/rkn-guard-manager.sh', '/opt/rkn-guard-manual.list', '/opt/AdGuardHome', '/root/.lucx-adguard-info', '/usr/local/lib/vibehost-guard', '/etc/vibehost-guard']]
+allowed = [p.lstrip('/') for p in ['/etc/nginx', '/etc/x-ui', '/etc/default/x-ui', '/etc/fail2ban', '/etc/cron.d', '/usr/local/x-ui', '/usr/bin/x-ui', '/usr/local/lib/3x-ui-pro', '/usr/local/lib/lucx-ui-pro', '/usr/local/sbin/lucx-apply-qdisc', '/usr/local/sbin/lucx-awg-sysctl-guard', '/etc/systemd/system', '/etc/letsencrypt', '/var/lib/letsencrypt', '/var/log/letsencrypt', '/etc/sysctl.conf', '/root/cert', '/var/www/html', '/var/www/diagnostics', '/var/www/subpage', '/var/www/tproxy', '/root/.lucx-tg-web-proxy-info', '/var/lib/lucx-ui-preinstall', '/etc/sysctl.d/99-lucx-ui-forwarding.conf', '/etc/sysctl.d/99-bbr-x-ui.conf', '/etc/sysctl.d/99-awg-performance.conf', '/etc/sysctl.d/99-zz-lucx-ui-tuning.conf', '/etc/modules-load.d/lucx-ui-network.conf', '/etc/modules-load.d/amneziawg.conf', '/etc/modules-load.d/tcp-bbr.conf', '/etc/default/ufw', '/etc/ufw/user.rules', '/etc/ufw/user6.rules', '/etc/ufw/before.rules', '/etc/ufw/before6.rules', '/etc/ipset.conf', '/etc/iptables/ipsets', '/etc/rsyslog.d/10-iptables-scanners.conf', '/etc/logrotate.d/iptables-scanners', '/etc/logrotate.d/nginx', '/etc/systemd/journald.conf.d/99-lucx-ui-pro-logs.conf', '/usr/local/bin/rkn-guard', '/usr/local/bin/rkn', '/usr/local/bin/antiscan-aggregate-logs.sh', '/opt/rkn-guard-manager.sh', '/opt/rkn-guard-manual.list', '/etc/rkn-guard-sources.list', '/var/lib/rkn-guard/sources.json', '/opt/AdGuardHome', '/root/.lucx-adguard-info', '/usr/local/lib/vibehost-guard', '/etc/vibehost-guard']]
 seen, links = set(), set()
 try:
     with tarfile.open(archive, 'r:gz') as tar:
@@ -1874,7 +1876,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.05-343.1'
+REVISION = '2026.11.09-355.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -2359,6 +2361,23 @@ def adapt_updater(path):
     if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
         raise RuntimeError('Native updater contract changed; panel has not been modified')
     text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Reuse the archive Pro already downloaded and verified before stopping x-ui.
+    staged_downloads = (
+        ('    ${curl_bin} -fLRo ${xui_folder}-linux-$(arch).tar.gz https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.tar.gz" "${xui_folder}-linux-$(arch).tar.gz"'),
+        ('    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w \'%{http_code}\' "https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.sha256" "${archive}.sha256" || exit 1\n        sidecar_code=200'),
+        ('    ${curl_bin} -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/${script_ref}/x-ui.sh" > /dev/null 2>&1',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/x-ui.cli" "${xui_script_temp}"'),
+        ('    require_repo_files "${script_ref}" "${required_files[@]}"',
+         '[[ "$release" != alpine ]] || require_repo_files "${script_ref}" "${required_files[@]}"'),
+    )
+    for original, staged in staged_downloads:
+        if text.count(original) == 1:
+            text = text.replace(original,
+                                '    if [[ -n "${LUCX_PRO_PANEL_STAGE:-}" ]]; then\n'
+                                '        ' + staged + '\n'
+                                '    else\n' + original + '\n    fi', 1)
     # Startup also migrates the schema. Keep it stopped until the explicit
     # migration/protection checks complete to avoid concurrent ALTER TABLE.
     for command in ('systemctl start x-ui', 'rc-service x-ui start'):
@@ -2625,8 +2644,26 @@ def remove_native_rkn_schedule(root):
         subprocess.run(['systemctl', 'daemon-reload'], check=True)
 
 
+RKN_LIST_UPDATE_COMMAND = 'managed=()\nhelp=$(rkn-guard update --help)\nif [[ "$help" == *--managed-lists* ]]; then\n  managed=(--managed-lists)\nfi\nif [[ -e /etc/rkn-guard-sources.list ]]; then\n  urls=()\n  while IFS= read -r url || [[ -n "$url" ]]; do\n    url=${url%%#*}\n    url="${url#"${url%%[![:space:]]*}"}"\n    url="${url%"${url##*[![:space:]]}"}"\n    [[ -z "$url" ]] || urls+=(-u "$url")\n  done < /etc/rkn-guard-sources.list\n  exec rkn-guard update "${managed[@]}" "${urls[@]}"\nfi\nexec rkn-guard update "${managed[@]}" \\\n'
+
+
 def repair_rkn_timers(root):
     remove_native_rkn_schedule(root)
+    self_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-self-update.sh'
+    if self_updater.is_file():
+        text = self_updater.read_text(encoding='utf-8')
+        if 'rkn-guard setup-logging\n' not in text:
+            self_updater.write_text(text.replace('bash "$tmp"\n', 'bash "$tmp"\nrkn-guard setup-logging\n', 1), encoding='utf-8')
+    list_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-list-update.sh'
+    if list_updater.is_file():
+        text = list_updater.read_text(encoding='utf-8')
+        command = 'exec rkn-guard update \\\n'
+        if command in text:
+            text = text.replace(command, RKN_LIST_UPDATE_COMMAND, 1)
+            last = '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list\n'
+            if text.endswith(last):
+                text = text[:-len(last)] + '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list \\\n  -u https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt \\\n  -u https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt\n'
+            list_updater.write_text(text, encoding='utf-8')
     for name, delay in (('list', '15min'), ('self', '30min')):
         path = root / f'etc/systemd/system/rkn-guard-{name}-update.timer'
         if path.is_file():
@@ -2819,6 +2856,19 @@ restore_renewal_state() {
     return "$failed"
 }
 
+restore_rkn_logging() {
+    [[ -f "$1/files/etc/rsyslog.d/10-iptables-scanners.conf" ]] || return 0
+    local help output status
+    help=$(rkn-guard --help) || return 1
+    [[ "$help" == *setup-logging* ]] || return 0
+    # Raw logs are not archived; let the native CLI recreate and reopen them.
+    output=$(rkn-guard setup-logging 2>&1) || {
+        status=$?
+        printf '%s\n' "$output" >&2
+        return "$status"
+    }
+}
+
 cmd_restore() {
     require_root
 
@@ -2837,7 +2887,7 @@ cmd_restore() {
     (( have_kb >= unpacked_kb * 2 + 102400 )) || \
         die "Not enough free space in ${BACKUP_STORE}: need ~$(( (unpacked_kb * 2 + 102400) / 1024 )) MB, have $(( have_kb / 1024 )) MB"
 
-    local staging awg_installed_from_backup=0 awg_restore_failed=0
+    local staging awg_installed_from_backup=0 awg_restore_failed=0 rkn_logging_failed=0
     staging=$(make_staging restore)
     RESTORE_STAGING="$staging"
     trap 'rm -rf -- "$RESTORE_STAGING"' EXIT
@@ -3153,6 +3203,7 @@ PY_TG_RESTORE
 
     # Restore rkn-guard runtime units and LucX automatic-update timers when present.
     if [[ -x /usr/local/bin/rkn-guard ]]; then
+        restore_rkn_logging "$staging" || rkn_logging_failed=1
         for unit in antiscan-ipset-restore.service antiscan-move-rules.service antiscan-aggregate.timer; do
             [[ -f "/etc/systemd/system/${unit}" ]] || continue
             restore_unit_state "$unit"
@@ -3315,6 +3366,7 @@ PY_TG_RESTORE
     if (( awg_restore_failed )); then
         die "Restore incomplete: AmneziaWG could not be restored. Other components were restored; see the errors above."
     fi
+    (( ! rkn_logging_failed )) || die "Restore incomplete: native RKN logging repair failed. Other components were restored; see the errors above."
     green "==> Restore complete."
     green "    Check status with:"
     green "      systemctl status x-ui nginx"

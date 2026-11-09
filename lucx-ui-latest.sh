@@ -90,7 +90,7 @@ CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
 COMPONENTS_ONLY=""
-PRO_COMPAT_REVISION="2026.11.05-343.1"
+PRO_COMPAT_REVISION="2026.11.09-355.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -661,7 +661,27 @@ fi
 # A check is read-only; package download, backup and mutations follow the menu.
 fetch_release_info() {
     local ref="$1" output="$2"
-    if [[ "$ref" == latest ]]; then ref=latest; else ref="tags/$ref"; fi
+    if [[ "$ref" == latest ]]; then
+        curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
+            'https://api.github.com/repos/AlexeyLCP/lucx-ui/releases?per_page=100' -o "$output" || return 1
+        python3 - "$output" "$(_arch)" <<'PY_LINUX_RELEASE'
+import json, re, sys
+path, arch = sys.argv[1:]
+releases = json.load(open(path, encoding='utf-8'))
+name = 'x-ui-linux-' + arch + '.tar.gz'
+for release in releases:
+    if (not release.get('draft') and not release.get('prerelease')
+            and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-lucx\.[0-9]+', release.get('tag_name', ''))
+            and {name, name + '.sha256'} <= {a.get('name') for a in release.get('assets', []) if a.get('size', 0) > 0}):
+        with open(path, 'w', encoding='utf-8') as stream:
+            json.dump(release, stream)
+        break
+else:
+    raise SystemExit('No stable LucX release with an archive for Linux ' + arch)
+PY_LINUX_RELEASE
+        return $?
+    fi
+    ref="tags/$ref"
     curl -fSL --retry 3 --connect-timeout 15 --max-time 90 \
         "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/$ref" -o "$output"
 }
@@ -1030,7 +1050,7 @@ PY_UPDATE_CERT_FILES
         # the wizard settings and run AWG separately under the Pro BBR guard.
         # timeout/EOF prevent an unexpected new prompt hanging indefinitely.
         (( failed )) || timeout --foreground --signal=TERM --kill-after=30 1800 \
-            env LUCX_PRO_AWG_ENABLED="$awg_present" XUI_UPDATE_TAG="$UPDATE_TARGET" XUI_UPDATE_STATUS_FILE="$stage/native-status.json" \
+            env LUCX_PRO_PANEL_STAGE="$stage" LUCX_PRO_AWG_ENABLED="$awg_present" XUI_UPDATE_TAG="$UPDATE_TARGET" XUI_UPDATE_STATUS_FILE="$stage/native-status.json" \
             bash "$stage/native-update.sh" </dev/null || failed=1
         systemctl stop x-ui || failed=1
         # Restore only missing configured Pro sidecar binaries/state; never
@@ -1273,19 +1293,20 @@ choose_amneziawg() {
 download_one_geo() {
     local dest="$1" name="$2" url="$3" fallback="${4:-}" min_bytes="${5:-50000}"
     local max_time="${6:-180}"
-    local tmp http size head
+    local tmp http size head status=0
     tmp="${dest}/${name}.tmp.$$"
     rm -f "$tmp"
-    http=$(curl -sSfLRo "$tmp" --retry 4 --retry-delay 2 --connect-timeout 15 --max-time "$max_time" -w '%{http_code}' "$url" || true)
-    if [[ "$http" != "200" || ! -s "$tmp" ]]; then
+    http=$(curl -sSfLRo "$tmp" --retry 4 --retry-delay 2 --connect-timeout 15 --max-time "$max_time" -w '%{http_code}' "$url") || status=$?
+    if (( status != 0 )) || [[ "$http" != "200" || ! -s "$tmp" ]]; then
         rm -f "$tmp"
         if [[ -n "$fallback" ]]; then
-            http=$(curl -sSfLRo "$tmp" --retry 4 --retry-delay 2 --connect-timeout 15 --max-time "$max_time" -w '%{http_code}' "$fallback" || true)
+            status=0
+            http=$(curl -sSfLRo "$tmp" --retry 4 --retry-delay 2 --connect-timeout 15 --max-time "$max_time" -w '%{http_code}' "$fallback") || status=$?
         fi
     fi
-    if [[ "$http" != "200" || ! -s "$tmp" ]]; then
+    if (( status != 0 )) || [[ "$http" != "200" || ! -s "$tmp" ]]; then
         rm -f "$tmp"
-        echo "Failed to download ${name}"
+        echo "Failed to download ${name} (HTTP ${http:-unknown}; curl exit $status): ${fallback:-$url}"
         return 1
     fi
     size=$(wc -c < "$tmp"); size=${size// /}
@@ -1329,7 +1350,7 @@ fetch_lucx_geofiles() {
     ensure_stock_geo "$dest" geoip_IR.dat "$GH/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat" "" 50000 || true
     ensure_stock_geo "$dest" geosite_IR.dat "$GH/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat" "" 50000 || true
     ensure_stock_geo "$dest" geoip_RU.dat "$GH/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat" "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat" 50000 || true
-    ensure_stock_geo "$dest" geosite_RU.dat "$GH/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat" "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat" 50000 || true
+    ensure_stock_geo "$dest" geosite_RU.dat "$GH/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat" "$RAW/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat" 50000 600 || true
     ensure_stock_geo "$dest" geoip_ROSCOM.dat "$GH/hydraponique/roscomvpn-geoip/releases/latest/download/geoip.dat" "$CDN/hydraponique/roscomvpn-geoip/release/geoip.dat" 50000 || true
     ensure_stock_geo "$dest" geosite_ROSCOM.dat "$GH/hydraponique/roscomvpn-geosite/releases/latest/download/geosite.dat" "$CDN/hydraponique/roscomvpn-geosite/release/geosite.dat" 50000 || true
     if panel_supports_ga_geodata; then
@@ -3263,7 +3284,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.05-343.1'
+REVISION = '2026.11.09-355.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -3748,6 +3769,23 @@ def adapt_updater(path):
     if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
         raise RuntimeError('Native updater contract changed; panel has not been modified')
     text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Reuse the archive Pro already downloaded and verified before stopping x-ui.
+    staged_downloads = (
+        ('    ${curl_bin} -fLRo ${xui_folder}-linux-$(arch).tar.gz https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.tar.gz" "${xui_folder}-linux-$(arch).tar.gz"'),
+        ('    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w \'%{http_code}\' "https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.sha256" "${archive}.sha256" || exit 1\n        sidecar_code=200'),
+        ('    ${curl_bin} -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/${script_ref}/x-ui.sh" > /dev/null 2>&1',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/x-ui.cli" "${xui_script_temp}"'),
+        ('    require_repo_files "${script_ref}" "${required_files[@]}"',
+         '[[ "$release" != alpine ]] || require_repo_files "${script_ref}" "${required_files[@]}"'),
+    )
+    for original, staged in staged_downloads:
+        if text.count(original) == 1:
+            text = text.replace(original,
+                                '    if [[ -n "${LUCX_PRO_PANEL_STAGE:-}" ]]; then\n'
+                                '        ' + staged + '\n'
+                                '    else\n' + original + '\n    fi', 1)
     # Startup also migrates the schema. Keep it stopped until the explicit
     # migration/protection checks complete to avoid concurrent ALTER TABLE.
     for command in ('systemctl start x-ui', 'rc-service x-ui start'):
@@ -4014,8 +4052,26 @@ def remove_native_rkn_schedule(root):
         subprocess.run(['systemctl', 'daemon-reload'], check=True)
 
 
+RKN_LIST_UPDATE_COMMAND = 'managed=()\nhelp=$(rkn-guard update --help)\nif [[ "$help" == *--managed-lists* ]]; then\n  managed=(--managed-lists)\nfi\nif [[ -e /etc/rkn-guard-sources.list ]]; then\n  urls=()\n  while IFS= read -r url || [[ -n "$url" ]]; do\n    url=${url%%#*}\n    url="${url#"${url%%[![:space:]]*}"}"\n    url="${url%"${url##*[![:space:]]}"}"\n    [[ -z "$url" ]] || urls+=(-u "$url")\n  done < /etc/rkn-guard-sources.list\n  exec rkn-guard update "${managed[@]}" "${urls[@]}"\nfi\nexec rkn-guard update "${managed[@]}" \\\n'
+
+
 def repair_rkn_timers(root):
     remove_native_rkn_schedule(root)
+    self_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-self-update.sh'
+    if self_updater.is_file():
+        text = self_updater.read_text(encoding='utf-8')
+        if 'rkn-guard setup-logging\n' not in text:
+            self_updater.write_text(text.replace('bash "$tmp"\n', 'bash "$tmp"\nrkn-guard setup-logging\n', 1), encoding='utf-8')
+    list_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-list-update.sh'
+    if list_updater.is_file():
+        text = list_updater.read_text(encoding='utf-8')
+        command = 'exec rkn-guard update \\\n'
+        if command in text:
+            text = text.replace(command, RKN_LIST_UPDATE_COMMAND, 1)
+            last = '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list\n'
+            if text.endswith(last):
+                text = text[:-len(last)] + '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list \\\n  -u https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt \\\n  -u https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt\n'
+            list_updater.write_text(text, encoding='utf-8')
     for name, delay in (('list', '15min'), ('self', '30min')):
         path = root / f'etc/systemd/system/rkn-guard-{name}-update.timer'
         if path.is_file():
@@ -4338,10 +4394,27 @@ install_rkn_guard_auto_updates() {
 #!/usr/bin/env bash
 set -euo pipefail
 command -v rkn-guard >/dev/null 2>&1 || exit 0
-exec rkn-guard update \
+managed=()
+help=$(rkn-guard update --help)
+if [[ "$help" == *--managed-lists* ]]; then
+  managed=(--managed-lists)
+fi
+if [[ -e /etc/rkn-guard-sources.list ]]; then
+  urls=()
+  while IFS= read -r url || [[ -n "$url" ]]; do
+    url=${url%%#*}
+    url="${url#"${url%%[![:space:]]*}"}"
+    url="${url%"${url##*[![:space:]]}"}"
+    [[ -z "$url" ]] || urls+=(-u "$url")
+  done < /etc/rkn-guard-sources.list
+  exec rkn-guard update "${managed[@]}" "${urls[@]}"
+fi
+exec rkn-guard update "${managed[@]}" \
   -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/government_networks.list \
   -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/antiscanner.list \
-  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list
+  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list \
+  -u https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt \
+  -u https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt
 RKN_LIST_UPDATE
 
     if [[ "$update_mode" == "2" ]]; then
@@ -4363,6 +4436,7 @@ trap 'rm -f "$tmp"' EXIT
 curl -fsSL --connect-timeout 15 --max-time 180 \
   https://raw.githubusercontent.com/Flecksis/rkn-guard/master/app%20install.sh -o "$tmp"
 bash "$tmp"
+rkn-guard setup-logging
 curl -fsSL --connect-timeout 15 --max-time 60 \
   https://raw.githubusercontent.com/Flecksis/rkn-guard/master/install.sh \
   -o /opt/rkn-guard-manager.sh
@@ -4975,6 +5049,72 @@ confirm_reinstall() {
     done
 }
 
+_arch() {
+    case "$(uname -m)" in
+        x86_64|x64|amd64) echo 'amd64' ;;
+        armv8*|arm64|aarch64) echo 'arm64' ;;
+        *) msg_err "LucX release supports Linux amd64/arm64 only." >&2; return 1 ;;
+    esac
+}
+
+# Same checksum asset and 404 compatibility rule as the upstream installer.
+verify_release_checksum() {
+    local url="$1" file="$2" sums="${2}.sha256" code expected actual
+    code=$(curl -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 \
+        -o "$sums" -w '%{http_code}' "${url}.sha256") || {
+        rm -f "$sums" "$file"; return 1;
+    }
+    if [[ "$code" == "404" ]]; then
+        rm -f "$sums"
+        msg_inf "This older release has no checksum; verification unavailable."
+        return 0
+    fi
+    [[ "$code" == "200" ]] || { rm -f "$sums" "$file"; return 1; }
+    expected=$(awk 'NR == 1 {print $1}' "$sums")
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    rm -f "$sums"
+    if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$expected" != "$actual" ]]; then
+        rm -f "$file"
+        msg_err "Release checksum mismatch."
+        return 1
+    fi
+    msg_ok "Release checksum verified: $actual"
+}
+
+stage_fresh_panel() {
+    local arch ref release_url
+    arch=$(_arch) || return 1
+    FRESH_PANEL_STAGE=$(mktemp -d) || return 1
+    trap 'rm -rf -- "$FRESH_PANEL_STAGE"' EXIT
+    ref="${PANEL_VERSION:-latest}"
+    if [[ "$ref" == latest ]]; then
+        fetch_release_info latest "$FRESH_PANEL_STAGE/release.json" || return 1
+        ref=$(release_tag "$FRESH_PANEL_STAGE/release.json") || return 1
+    else
+        ref="v${ref#v}"
+    fi
+    [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-lucx\.[0-9]+$ ]] || {
+        msg_err "Не удалось определить тег LucX: ${ref:-нет ответа GitHub}"
+        return 1
+    }
+    release_url="https://github.com/AlexeyLCP/lucx-ui/releases/download/$ref/x-ui-linux-$arch.tar.gz"
+    if ! curl -fSL --retry 3 --connect-timeout 20 --max-time 900 \
+        "$release_url" -o "$FRESH_PANEL_STAGE/panel.tar.gz"; then
+        msg_err "Не удалось скачать архив LucX: $release_url"
+        return 1
+    fi
+    if ! verify_release_checksum "$release_url" "$FRESH_PANEL_STAGE/panel.tar.gz"; then
+        msg_err "Не удалось проверить архив LucX: $release_url.sha256"
+        return 1
+    fi
+    if ! tar -xOf "$FRESH_PANEL_STAGE/panel.tar.gz" x-ui/x-ui.sh > "$FRESH_PANEL_STAGE/x-ui.cli" ||
+       [[ ! -s "$FRESH_PANEL_STAGE/x-ui.cli" ]] ||
+       ! bash -n "$FRESH_PANEL_STAGE/x-ui.cli"; then
+        msg_err "Не удалось прочитать x-ui.sh из архива LucX: $release_url"
+        return 1
+    fi
+}
+
 if is_full_install_request && existing_lucx_install_detected; then
     [[ -f "$PREINSTALL_STATE_DIR/owned-by-lucx-ui-pro" ]] || {
         msg_err "Existing panel has no ownership snapshot; refusing to remove it automatically."
@@ -4984,6 +5124,7 @@ if is_full_install_request && existing_lucx_install_detected; then
         msg_inf "Повторная установка отменена. Панель не изменена."
         exit 0
     fi
+    stage_fresh_panel || exit 1
     uninstall_xui || exit 1
     msg_ok "Previous installation completely removed."
 fi
@@ -5577,81 +5718,17 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 # INSTALL PANEL (LucX-UI)
 # ─────────────────────────────────────────────────────────────────────────────
-_arch() {
-    case "$(uname -m)" in
-        x86_64|x64|amd64) echo 'amd64' ;;
-        armv8*|arm64|aarch64) echo 'arm64' ;;
-        *) msg_err "LucX release supports Linux amd64/arm64 only." >&2; return 1 ;;
-    esac
-}
-
-# Same checksum asset and 404 compatibility rule as the upstream installer.
-verify_release_checksum() {
-    local url="$1" file="$2" sums="${2}.sha256" code expected actual
-    code=$(curl -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 \
-        -o "$sums" -w '%{http_code}' "${url}.sha256") || {
-        rm -f "$sums" "$file"; return 1;
-    }
-    if [[ "$code" == "404" ]]; then
-        rm -f "$sums"
-        msg_inf "This older release has no checksum; verification unavailable."
-        return 0
-    fi
-    [[ "$code" == "200" ]] || { rm -f "$sums" "$file"; return 1; }
-    expected=$(awk 'NR == 1 {print $1}' "$sums")
-    actual=$(sha256sum "$file" | awk '{print $1}')
-    rm -f "$sums"
-    if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$expected" != "$actual" ]]; then
-        rm -f "$file"
-        msg_err "Release checksum mismatch."
-        return 1
-    fi
-    msg_ok "Release checksum verified: $actual"
-}
-
 _panel_initial_config() {
     /usr/local/x-ui/x-ui setting -username "asdfasdf" -password "asdfasdf" -port "2096" -webBasePath "asdfasdf"
     /usr/local/x-ui/x-ui migrate
 }
 
 install_panel() {
-    local tag_version dest script_ref GH RAW release_url
-    GH='https://github.com'
-    RAW='https://raw.githubusercontent.com'
-    _arch >/dev/null || return 1
-    apt-get update && apt-get install -y -q wget curl tar tzdata
-    cd /usr/local/
-    if [[ -n "$PANEL_VERSION" && "$PANEL_VERSION" != "latest" ]]; then
-        tag_version="${PANEL_VERSION#v}"
-        tag_version="v${tag_version}"
-        if ! curl -fsILo /dev/null "$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz" \
-           && ! curl -4 -fsILo /dev/null "$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"; then
-            echo "LucX-UI release ${tag_version} not found." && exit 1
-        fi
-    else
-        tag_version=$(curl -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-        if [[ -z "$tag_version" || "$tag_version" == "null" ]]; then
-            tag_version=$(curl -4 -Ls "https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-        fi
-        if [[ -z "$tag_version" || "$tag_version" == "null" ]]; then
-            echo "Failed to fetch LucX-UI version." && exit 1
-        fi
-    fi
-    echo "Installing LucX-UI ${tag_version} ..."
-    release_url="$GH/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(_arch).tar.gz"
-    printf '%s\n' "/usr/local/x-ui-linux-$(_arch).tar.gz" > "$PREINSTALL_STATE_DIR/release-archive"
-    wget -O "/usr/local/x-ui-linux-$(_arch).tar.gz" "$release_url" || return 1
-    [[ -s "/usr/local/x-ui-linux-$(_arch).tar.gz" ]] || return 1
-    verify_release_checksum "$release_url" "/usr/local/x-ui-linux-$(_arch).tar.gz" || return 1
-    script_ref="${tag_version}"
-    [[ "$script_ref" == "dev-latest" ]] && script_ref="main"
-    wget -O /usr/bin/x-ui-temp "$RAW/AlexeyLCP/lucx-ui/${script_ref}/x-ui.sh"
-    if [[ $? -ne 0 ]]; then wget -O /usr/bin/x-ui-temp "$RAW/AlexeyLCP/lucx-ui/main/x-ui.sh"; fi
-    [[ $? -ne 0 ]] && echo "Failed to download x-ui.sh" && exit 1
+    [[ -n "${FRESH_PANEL_STAGE:-}" ]] || stage_fresh_panel || return 1
+    cd /usr/local/ || return 1
     [[ -d /usr/local/x-ui/ ]] && systemctl stop x-ui 2>/dev/null; rm -rf /usr/local/x-ui/
     # Release archives can retain the CI runner uid; sidecars must be root-owned.
-    tar --no-same-owner -zxvf x-ui-linux-$(_arch).tar.gz || return 1
-    rm -f x-ui-linux-$(_arch).tar.gz
+    tar --no-same-owner -zxvf "$FRESH_PANEL_STAGE/panel.tar.gz" || return 1
     cd x-ui
     chmod +x x-ui x-ui.sh
     if [[ $(_arch) == "armv5" || $(_arch) == "armv6" || $(_arch) == "armv7" ]]; then
@@ -5661,8 +5738,7 @@ install_panel() {
     fi
     chmod +x bin/* 2>/dev/null || true
     fetch_lucx_geofiles /usr/local/x-ui/bin || { echo "Failed to download LucX geodata."; exit 1; }
-    mv -f /usr/bin/x-ui-temp /usr/bin/x-ui
-    chmod +x /usr/bin/x-ui
+    install -m 755 "$FRESH_PANEL_STAGE/x-ui.cli" /usr/bin/x-ui || return 1
     _panel_initial_config
     cp -f x-ui.service.debian /etc/systemd/system/x-ui.service || return 1
     # Match the author's MTProxy service account setup outside the systemd sandbox.
@@ -5676,7 +5752,7 @@ install_panel() {
     # temporary panel port and the final subscription port has not yet been
     # written. Starting here can make the web server and sub server compete
     # for port 2096. The first real start is deferred until configure_xui_db().
-    msg_ok "LucX-UI ${tag_version} installed."
+    msg_ok "LucX-UI installed."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -7208,6 +7284,7 @@ main() {
         printf '%s\n' manual > "$PREINSTALL_STATE_DIR/auto-domain-mode" || return 1
     fi
     install_base_dependencies || return 1
+    [[ -n "${FRESH_PANEL_STAGE:-}" ]] || stage_fresh_panel || return 1
     mark_install_in_progress
     clean_previous_install || return 1
     install_packages || return 1

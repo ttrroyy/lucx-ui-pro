@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.05-343.1'
+REVISION = '2026.11.09-355.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
@@ -495,6 +495,23 @@ def adapt_updater(path):
     if text.count(config) != 1 or text.count(awg) != 1 or 'XUI_UPDATE_TAG' not in text:
         raise RuntimeError('Native updater contract changed; panel has not been modified')
     text = text.replace(config, '    "${xui_folder}/x-ui" migrate || exit 1\n', 1)
+    # Reuse the archive Pro already downloaded and verified before stopping x-ui.
+    staged_downloads = (
+        ('    ${curl_bin} -fLRo ${xui_folder}-linux-$(arch).tar.gz https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.tar.gz" "${xui_folder}-linux-$(arch).tar.gz"'),
+        ('    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w \'%{http_code}\' "https://github.com/AlexeyLCP/lucx-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/panel.sha256" "${archive}.sha256" || exit 1\n        sidecar_code=200'),
+        ('    ${curl_bin} -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/${script_ref}/x-ui.sh" > /dev/null 2>&1',
+         'cp -- "$LUCX_PRO_PANEL_STAGE/x-ui.cli" "${xui_script_temp}"'),
+        ('    require_repo_files "${script_ref}" "${required_files[@]}"',
+         '[[ "$release" != alpine ]] || require_repo_files "${script_ref}" "${required_files[@]}"'),
+    )
+    for original, staged in staged_downloads:
+        if text.count(original) == 1:
+            text = text.replace(original,
+                                '    if [[ -n "${LUCX_PRO_PANEL_STAGE:-}" ]]; then\n'
+                                '        ' + staged + '\n'
+                                '    else\n' + original + '\n    fi', 1)
     # Startup also migrates the schema. Keep it stopped until the explicit
     # migration/protection checks complete to avoid concurrent ALTER TABLE.
     for command in ('systemctl start x-ui', 'rc-service x-ui start'):
@@ -761,8 +778,26 @@ def remove_native_rkn_schedule(root):
         subprocess.run(['systemctl', 'daemon-reload'], check=True)
 
 
+RKN_LIST_UPDATE_COMMAND = 'managed=()\nhelp=$(rkn-guard update --help)\nif [[ "$help" == *--managed-lists* ]]; then\n  managed=(--managed-lists)\nfi\nif [[ -e /etc/rkn-guard-sources.list ]]; then\n  urls=()\n  while IFS= read -r url || [[ -n "$url" ]]; do\n    url=${url%%#*}\n    url="${url#"${url%%[![:space:]]*}"}"\n    url="${url%"${url##*[![:space:]]}"}"\n    [[ -z "$url" ]] || urls+=(-u "$url")\n  done < /etc/rkn-guard-sources.list\n  exec rkn-guard update "${managed[@]}" "${urls[@]}"\nfi\nexec rkn-guard update "${managed[@]}" \\\n'
+
+
 def repair_rkn_timers(root):
     remove_native_rkn_schedule(root)
+    self_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-self-update.sh'
+    if self_updater.is_file():
+        text = self_updater.read_text(encoding='utf-8')
+        if 'rkn-guard setup-logging\n' not in text:
+            self_updater.write_text(text.replace('bash "$tmp"\n', 'bash "$tmp"\nrkn-guard setup-logging\n', 1), encoding='utf-8')
+    list_updater = root / 'usr/local/lib/lucx-ui-pro/rkn-guard-list-update.sh'
+    if list_updater.is_file():
+        text = list_updater.read_text(encoding='utf-8')
+        command = 'exec rkn-guard update \\\n'
+        if command in text:
+            text = text.replace(command, RKN_LIST_UPDATE_COMMAND, 1)
+            last = '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list\n'
+            if text.endswith(last):
+                text = text[:-len(last)] + '  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list \\\n  -u https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt \\\n  -u https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt\n'
+            list_updater.write_text(text, encoding='utf-8')
     for name, delay in (('list', '15min'), ('self', '30min')):
         path = root / f'etc/systemd/system/rkn-guard-{name}-update.timer'
         if path.is_file():

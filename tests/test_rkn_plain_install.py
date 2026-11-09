@@ -103,5 +103,52 @@ class RknPlainInstall(unittest.TestCase):
             self.assertEqual((units/'unrelated.timer').read_text(),'original')
             helper.repair_rkn_timers(root)
 
+    def test_timer_preserves_configured_base_sources_and_empty_selection(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('rkn_sources_compat',repo/'assets/compat/pro-compat.py')
+        helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            runner=root/'usr/local/lib/lucx-ui-pro/rkn-guard-list-update.sh'
+            runner.parent.mkdir(parents=True)
+            self_runner=runner.with_name('rkn-guard-self-update.sh')
+            self_runner.write_text('bash "$tmp"\n')
+            runner.write_text('exec rkn-guard update '+chr(92)+'\n  -u https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list\n')
+            helper.repair_rkn_timers(root)
+            updated=runner.read_text()
+            helper.repair_rkn_timers(root)
+            self.assertEqual(runner.read_text(),updated)
+            self.assertEqual(self_runner.read_text(),'bash "$tmp"\nrkn-guard setup-logging\n')
+            self.assertIn('C24Be/AS_Network_List',updated)
+            config=root/'base-sources'
+            body=updated.replace('/etc/rkn-guard-sources.list',str(config))
+            stub='rkn-guard(){ if [[ "$2" == --help ]]; then echo --managed-lists; else printf "ARG=%s\\n" "$@"; fi; }; fake_exec(){ rkn-guard "$@"; exit; };\n'
+            for text in (' # comment\n  https://example.org/custom # note\n',''):
+                config.write_text(text)
+                result=subprocess.run(['bash','-c',stub+body.replace('exec rkn-guard','fake_exec')],text=True,capture_output=True,timeout=5)
+                self.assertEqual(result.returncode,0,result.stderr)
+                custom=result.stdout.split('ARG=update')[1].splitlines()
+                self.assertIn('ARG=--managed-lists',custom)
+                if text:self.assertIn('ARG=https://example.org/custom',custom)
+                else:self.assertNotIn('ARG=-u',custom)
+
+
+    def test_restore_repairs_only_archived_supported_logging_and_propagates_errors(self):
+        source=(repo/'assets/backup/lucx-ui-backup.sh').read_text(encoding='utf-8')
+        body=source.split('restore_rkn_logging() {',1)[1].split('\n}\n',1)[0]
+        for archived,supported,status in ((False,True,7),(True,False,7),(True,True,0),(True,True,7)):
+            with self.subTest(archived=archived,supported=supported,status=status),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder)
+                if archived:
+                    config=root/'files/etc/rsyslog.d/10-iptables-scanners.conf'
+                    config.parent.mkdir(parents=True);config.touch()
+                stub='rkn-guard(){ if [[ "$1" == --help ]]; then printf "%s" "$HELP_TEXT"; else echo REPAIR > "$CALLED"; echo native-log; return "$NATIVE_RC"; fi; };\n'
+                env=dict(os.environ,HELP_TEXT='setup-logging' if supported else 'legacy',NATIVE_RC=str(status),CALLED=str(root/'called'))
+                result=subprocess.run(['bash','-c',stub+'restore_rkn_logging() {'+body+'\n}\nrestore_rkn_logging "$1"','test',str(root)],env=env,text=True,capture_output=True,timeout=5)
+                should_repair=archived and supported
+                self.assertEqual(result.returncode,status if should_repair else 0,result.stderr)
+                self.assertEqual((root/'called').exists(),should_repair)
+                self.assertEqual(result.stdout,'')
+                if should_repair and status:self.assertIn('native-log',result.stderr)
 
 if __name__=='__main__': unittest.main()

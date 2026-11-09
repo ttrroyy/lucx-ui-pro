@@ -8,6 +8,24 @@ def function(name):
     return re.search(r'^'+name+r'\(\) \{.*?^\}',SOURCE,re.M|re.S)[0]
 
 class Geodata306(unittest.TestCase):
+    def test_partial_http200_download_preserves_old_file_and_uses_fallback(self):
+        text='''curl(){
+  printf 200
+  if [[ "${!#}" == https://example.invalid/complete ]]; then
+    printf COMPLETE > "$2"; return 0
+  fi
+  printf partial > "$2"; return 28
+}
+'''+function('download_one_geo')+'''
+dest=$(dirname "$0")
+printf ORIGINAL > "$dest/test.dat"
+if download_one_geo "$dest" test.dat https://example.invalid/partial '' 1; then exit 1; fi
+[[ "$(cat "$dest/test.dat")" == ORIGINAL ]] || exit 2
+download_one_geo "$dest" test.dat https://example.invalid/partial https://example.invalid/complete 1 || exit 3
+[[ "$(cat "$dest/test.dat")" == COMPLETE ]] || exit 4
+'''
+        self.assertIn('HTTP 200; curl exit 28',self.bash(text))
+
     def bash(self,text):
         bash=os.environ.get('LUCX_TEST_BASH') or shutil.which('bash')
         if not bash:self.skipTest('bash unavailable')
@@ -48,6 +66,7 @@ class Geodata306(unittest.TestCase):
         result=self.bash(text)
         self.assertIn('geoip_GA.dat https://raw.githubusercontent.com/Ground-Zerro/Geo-Aggregator/main/geodat/geoip_GA.dat  50000 600',result)
         self.assertIn('geosite_GA.dat',result)
+        self.assertIn('geosite_RU.dat https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat 50000 600',result)
         self.assertIn('INSTALL_CONTINUES',result)
         self.assertNotIn('_GA.dat',self.bash(text.replace('panel_supports_ga_geodata(){ return 0; }','panel_supports_ga_geodata(){ return 1; }')))
 

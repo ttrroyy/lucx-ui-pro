@@ -6,6 +6,25 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=(ROOT/'lucx-ui-latest.sh').read_text(encoding='utf-8')
 
 class Hy2PortSelection(unittest.TestCase):
+    def test_latest_linux_release_skips_windows_only_and_prereleases(self):
+        import json,sys
+        body=re.search(r"<<'PY_LINUX_RELEASE'\n(.*?)\nPY_LINUX_RELEASE",SOURCE,re.S)[1]
+        def release(tag, assets, **flags):
+            names=assets+[a+'.sha256' for a in assets if a.endswith('.tar.gz')]
+            return dict(tag_name=tag, assets=[dict(name=a,size=123) for a in names], **flags)
+        fixtures=[release('v3.11.0-lucx.355',['x-ui-windows-amd64.zip']),
+                  release('v3.11.0-lucx.354',['x-ui-linux-amd64.tar.gz'],prerelease=True),
+                  release('v3.11.0-lucx.353',['x-ui-linux-arm64.tar.gz']),
+                  release('v3.11.0-lucx.352',['x-ui-linux-amd64.tar.gz'])]
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'releases.json'
+            path.write_text(json.dumps(fixtures))
+            subprocess.run([sys.executable,'-c',body,str(path),'amd64'],check=True,capture_output=True)
+            self.assertEqual(json.loads(path.read_text())['tag_name'],'v3.11.0-lucx.352')
+            path.write_text(json.dumps(fixtures[:1]))
+            result=subprocess.run([sys.executable,'-c',body,str(path),'amd64'],capture_output=True)
+            self.assertNotEqual(result.returncode,0)
+
     def select(self, values, env='', stub=''):
         bash=os.environ.get('LUCX_TEST_BASH') or shutil.which('bash')
         if not bash:self.skipTest('bash unavailable')
@@ -38,6 +57,30 @@ class Hy2PortSelection(unittest.TestCase):
         self.assertIn('tar --no-same-owner -zxvf',section)
         self.assertIn('id lucx-mtproxy',section)
         self.assertIn('useradd -r -M -N -s /usr/sbin/nologin lucx-mtproxy',section)
+
+    def test_release_404_stops_before_reinstall_removes_existing_panel(self):
+        bash=os.environ.get('LUCX_TEST_BASH') or shutil.which('bash')
+        if not bash:self.skipTest('bash unavailable')
+        start=SOURCE.index('_arch() {')
+        end=SOURCE.index('# This is the first installation question.',start)
+        script=r"""
+is_full_install_request() { return 0; }
+existing_lucx_install_detected() { return 0; }
+confirm_reinstall() { return 0; }
+msg_err() { printf '%s\n' "$*" >&2; }
+uninstall_xui() { echo UNINSTALL_RAN; }
+curl() { echo 'curl: HTTP 404' >&2; return 22; }
+PANEL_VERSION=v3.11.0-lucx.99999
+PREINSTALL_STATE_DIR=$1
+"""+SOURCE[start:end]
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder)/'owned-by-lucx-ui-pro').touch()
+            result=subprocess.run([bash,'-c',script,'test',folder],
+                                  capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,1)
+        self.assertIn('HTTP 404',result.stderr)
+        self.assertIn('/v3.11.0-lucx.99999/x-ui-linux-',result.stderr)
+        self.assertNotIn('UNINSTALL_RAN',result.stdout)
 
     def test_certificate_request_does_not_expand_unrelated_ip_certificate(self):
         bash=os.environ.get('LUCX_TEST_BASH') or shutil.which('bash')
