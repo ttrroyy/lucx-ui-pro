@@ -90,7 +90,7 @@ CFALLOW="n"
 PANEL_VERSION=""
 UPDATE_COMPAT=""
 COMPONENTS_ONLY=""
-PRO_COMPAT_REVISION="2026.11.09-355.1"
+PRO_COMPAT_REVISION="2026.11.10-357.1"
 
 # Self-contained log retention helper; also used when restoring older backups.
 run_log_policy() {
@@ -3284,7 +3284,7 @@ import sqlite3
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-REVISION = '2026.11.09-355.1'
+REVISION = '2026.11.10-357.1'
 # Generated from assets/clash/clash-sub-server.py by sync-embedded.py.
 CLASH_RENDERER_SOURCE = r'''
 #!/usr/bin/env python3
